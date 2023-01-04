@@ -1,0 +1,313 @@
+// Sunrise/sunset Clock with display and 5 button control
+//Hardware: Arduino Uno, DS3231 RTC, 1608 display with I2C adapter, 5 buttons (NO, momentary), 3 LED mosfets, RGB leds (or discrete) 
+//
+//Dan Bouchard 31Dec2022
+
+#include <DS3232RTC.h>
+#include <Wire.h>
+#include <time.h>
+
+DS3232RTC myRTC;
+
+const int snoozeBtn = 2;
+const int menuBtn = 3;
+const int upBtn = 4;
+const int downBtn = 5;
+const int enterBtn = 6;
+const int LEDRed = 9;
+const int LEDGreen = 10;
+const int LEDBlue = 11;
+const float sunMax = 149;
+const int redMax = 255;
+const int greenMax = 100;
+const int blueMax = 80;
+float sunTime;
+int sunriseHour = 07;
+int sunriseMinute = 00;
+float sunriseLength = 1;
+float snoozeTime = 5;
+bool snoozing = false;
+bool sunRising;
+int sunsetHour = 21;
+int sunsetMinute = 00;
+float sunsetLength = 1;
+bool sunSetting;
+int BPSnooze = 0;
+int BPMenu;
+int BPUp;
+int BPDown;
+int BPEnter;
+int clockWrite = 0;
+bool BUSnooze = false;
+bool BUMenu = false;
+bool BUUp = false;
+bool BUDown = false;
+bool BUEnter = false;
+bool menuMode = false;
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("Setting Up");
+  pinMode(snoozeBtn, INPUT);
+  pinMode(menuBtn, INPUT);
+  pinMode(upBtn, INPUT);
+  pinMode(downBtn, INPUT);
+  pinMode(enterBtn, INPUT);
+  pinMode(LEDRed, OUTPUT);
+  pinMode(LEDGreen, OUTPUT);
+  pinMode(LEDBlue, OUTPUT);
+  Serial.println("Pins sorted");
+  myRTC.begin();
+  Serial.println("Clock started");
+  setSyncProvider(myRTC.get);
+  Serial.println("Clock call sorted");
+  if(timeStatus() != timeSet) {
+    Serial.println("Unable to sync with the RTC");
+  } else {
+    Serial.println("RTC has set the system time");
+    Serial.println("Setup Complete");
+  }
+  timeFormatter();
+  delay(1000);
+}
+
+void loop() {
+  time_t currentTime = now();
+  time_t
+  BPSnooze = digitalRead(snoozeBtn);
+  BPMenu = digitalRead(menuBtn);
+  BPUp = digitalRead(upBtn);
+  BPDown = digitalRead(downBtn);
+  BPEnter = digitalRead(enterBtn);
+  if(BPSnooze == HIGH && BUSnooze == false) {
+    snooze();
+    BUSnooze = true;
+    Serial.println("Snoozing.");
+  }
+  if (BPSnooze == LOW && BUSnooze == true) {
+    BUSnooze = false;
+  }
+  if(BPMenu == HIGH && BUMenu == false) {
+    Serial.println("Menu");
+    BUMenu = true;
+  }
+  if (BPMenu == LOW && BUMenu == true) BUMenu = false;
+
+  if(BPUp == HIGH && BUUp == false){
+    sunRising = true;
+    sunSetting = false;
+    sunTime = 0;
+    Serial.println("Sun is Rising");
+    BUUp = true;
+  }
+  if (BPUp == LOW && BUUp == true) BUUp = false;
+  if(BPDown == HIGH && BUDown == false) {
+    sunSetting = true;
+    sunRising = false;
+    sunTime = sunMax;
+    Serial.print("Sun is Setting");
+    BUDown = true;
+  }
+
+  if (BPDown == LOW && BUDown == true) BUDown = false;
+
+  if (BPEnter == HIGH && BUEnter == false) {
+    Serial.println("Enter");
+    BUEnter = true;
+  }
+  if (BPEnter == LOW && BUEnter == true) BUEnter = false;
+
+  if (clockWrite == 1000) {
+    printDateTime(currentTime);
+    clockWrite = 0;
+  } else {
+    clockWrite += 1;
+  }
+  sunAlarmCheck(currentTime);
+  delay(10);
+}
+//snooze button function
+void snooze() {  
+      if (sunRising == true && snoozing == false){
+      sunTime -= (sunMax/sunriseLength*snoozeTime);
+      snoozing = true;
+      Serial.println();
+      Serial.println("Snoozing");
+    } else if (sunRising == true && snoozing == false) {
+      Serial.println("Already snoozing!");
+    } else if (sunSetting == true && snoozing == false) {
+      sunTime = 0;
+      sunSetting = false;
+      snoozing = false;
+      writeSunColor();
+      Serial.println("Goodnight!");
+    } else {
+      Serial.println("Nothing to snooze!");
+    }
+}
+void menu() {
+  char * menuItems[5] = {"SET TIME", "SUNRISE TIME", "SUNSET TIME", "SUNRISE LENGTH", "SUNSET LENGTH"};
+
+}
+//checks current hour and minute against setpoints to decide if a sunrise or sunset needs to be started
+//adjusts for sunset and sunrise lengths
+void sunAlarmCheck(time_t currentTime) {
+  int tNow = (hour(currentTime)*60+minute(currentTime));
+  int sRT = (sunriseHour*60+sunriseMinute-sunriseLength);
+  int sST = (sunsetHour*60+sunsetMinute-sunriseLength);
+  if (tNow == sRT && sunRising == false) {
+    sunRising = true;
+    sunSetting = false;
+    sunTime = 0;
+    Serial.println("Sun is Rising");
+  } else if (tNow == sST && sunSetting == false) {
+    sunSetting = true;
+    sunRising = false;
+    sunTime = sunMax;
+    Serial.print("Sun is Setting");
+  }
+  int srTR;
+  int ssTR;
+  if(sunRising == true) {
+    srTR = sRT+sunriseLength-tNow;
+    sunrise(srTR);
+  }
+  if(sunSetting == true) {
+    ssTR = sST+sunsetLength-tNow;
+    sunset(ssTR);
+  }
+}
+//set sunset time
+void setSunriseTime() {
+
+}
+
+//Color calculations based on formulas that are calibrated to a sunTime value of 65 maximum
+int colorCalcRed(float sunTime) {
+  double x = sunTime;
+  double mx = redMax;
+  x = (sunTime-45);
+  double C = mx-mx/(1+pow(1.15, x));
+  int redVal = C;
+  return max(0,redVal);
+} 
+
+int colorCalcGreen(float sunTime) {
+  double x = sunTime;
+  double mx = greenMax;
+  x = (sunTime-80);
+  double C = mx-mx/(1+pow(1.15, x));
+  int greenVal = C;
+  return max(0,greenVal);
+}
+
+int colorCalcBlue(float sunTime) {
+  double x = sunTime;
+  double mx = blueMax;
+  x = (sunTime-90);
+  double C = mx-mx/(1+pow(1.15, x));
+  int blueVal = C;
+  return max(0,blueVal);
+}
+//Writes the RGB values for sun color. Invert values if common anode LED are used (255-colorcalc)
+void writeSunColor() {
+  int R = colorCalcRed(sunTime);
+  int G = colorCalcGreen(sunTime);
+  int B = colorCalcBlue(sunTime);
+  analogWrite(LEDRed, R);
+  analogWrite(LEDGreen, G);
+  analogWrite(LEDBlue, B);
+}
+
+void sunrise(int srTR) {
+  if(sunRising == true) {
+    if (sunTime<(sunMax+1)) {
+      writeSunColor();
+      sunTime = sunMax*(((float)srTR)/sunriseLength);
+      //Serial.print(sunTime);
+    } else {
+      sunRising = false;
+      snoozing = false;      
+      Serial.println();
+      Serial.println("Sun has risen");
+    }
+  }
+}
+
+void sunset(int ssTR) {
+  if(sunSetting == true) {
+    if(sunTime>0) {
+      writeSunColor();
+      sunTime = sunMax-(sunMax*(((float)ssTR)/sunsetLength));
+      //Serial.print(sunTime);
+    } else {
+      sunSetting = false;
+      Serial.println();
+      Serial.println("Sun has set");
+    }
+  }
+}
+
+void timeFormatter() {
+  time_t t;
+  tmElements_t tm;
+    
+  String CDate = __DATE__;
+  String CTime = __TIME__;
+
+  tm.Year = ((CDate.substring(9,11).toInt())+30);
+  if (CDate.substring(4,4) == " ") tm.Day = (('0'+CDate.substring(4)).toInt());
+  else tm.Day = CDate.substring(4,6).toInt();
+  String CMo = CDate.substring(0,3);
+  String dateArray[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  for (int i=0; i<13; i++) {
+    if (dateArray[i] == CMo) {
+        tm.Month = (i+1);
+      } else if (i ==13) {
+      Serial.println("Month is undefined");
+      }
+    }
+  tm.Hour = CTime.substring(0,2).toInt();
+  tm.Minute = CTime.substring(3,5).toInt();
+  tm.Second = CTime.substring(6).toInt();
+  t = makeTime(tm);
+  myRTC.set(t);   // use the time_t value to ensure correct weekday is set
+  setTime(t);
+  Serial.print("RTC set to: ");
+  printDateTime(t);
+  Serial.println();
+  
+}
+
+// print date and time to Serial
+void printDateTime(time_t t) {
+    printDate(t);
+    Serial.print(' ');
+    printTime(t);
+}
+
+void printTime(time_t t) {
+    printI00(hour(t), ':');
+    printI00(minute(t), ':');
+    printI00(second(t), ' ');
+    Serial.println();
+}
+
+void printDate(time_t t) {
+    printI00(day(t), 0);
+    Serial.print(" ");
+    Serial.print(monthShortStr(month(t)));
+    Serial.print(" ");
+    Serial.print(year(t));
+    Serial.print(" ");
+}
+
+// Print an integer in "00" format (with leading zero),
+// followed by a delimiter character to Serial.
+// Input value assumed to be between 0 and 99.
+void printI00(int val, char delim) {
+    if (val < 10) Serial.print('0');
+    Serial.print(val);
+    if (delim > 0) Serial.print(delim);
+    return;
+}
