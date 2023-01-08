@@ -3,64 +3,152 @@
 //
 //Dan Bouchard 31Dec2022
 
+//clock and timing libraries required
 #include <DS3232RTC.h>
 #include <Wire.h>
 #include <time.h>
 
+//creating real time clock object
 DS3232RTC myRTC;
 
-const int snoozeBtn = 2;
-const int menuBtn = 3;
-const int upBtn = 4;
-const int downBtn = 5;
-const int enterBtn = 6;
+//pins assignments
+const int snoozePin = 2;
+const int menuPin = 3;
+const int upPin = 4;
+const int downPin = 5;
+const int enterPin = 6;
 const int LEDRed = 9;
 const int LEDGreen = 10;
 const int LEDBlue = 11;
-const float sunMax = 149;
+//led variables
 const int redMax = 255;
 const int greenMax = 100;
 const int blueMax = 80;
+bool lightOn = false;
+//sunset, and sunset variables
+const float sunMax = 149;
 float sunTime;
-int sunriseHour = 07;
+int sunriseHour = 8;
 int sunriseMinute = 00;
-float sunriseLength = 1;
-float snoozeTime = 5;
-bool snoozing = false;
+float sunriseLength = 60;
 bool sunRising;
 int sunsetHour = 21;
-int sunsetMinute = 00;
-float sunsetLength = 1;
+int sunsetMinute = 40;
+float sunsetLength = 60;
 bool sunSetting;
-int BPSnooze = 0;
+int timeCorrection = 4500;
+unsigned long sunMilliTimer = 0;
+//button, menu, and clock variables
+float snoozeTime = 5;
+bool snoozing = false;
+int BPSnooze;
 int BPMenu;
 int BPUp;
 int BPDown;
 int BPEnter;
-int clockWrite = 0;
 bool BUSnooze = false;
 bool BUMenu = false;
 bool BUUp = false;
 bool BUDown = false;
 bool BUEnter = false;
 bool menuMode = false;
+unsigned long timeoutTimer = 0;
+int timeoutTime = 3000;
+int clockWrite = 0;
+int menuIndex = 0;
+const String menuMenu[] = {"Set Sunrise Time","Set Sunrise Length","Set Sunset Time","Set Sunset Length","Set Time"};
 
+//creating a button class to handle debounce and long press functions
+class Button {
+  private:
+    const int debounceTimer = 20;
+    const int longPressTimer = 1200;
+    int btnPin = -1;
+    int btnState;
+    int lastBtnState;
+    unsigned long pressStartTime = 0;
+  
+    //Possible button states
+  public: typedef enum ButtonStates {
+    btnNotPressed,
+    btnInDebounce,
+    btnStartPressed,
+    btnPressed,
+    btnLongPressed
+  };
+
+    //button constructor
+  Button(int pin) {
+    btnPin = pin;
+    pinMode(btnPin, INPUT);
+    btnState = btnNotPressed;
+    lastBtnState = btnNotPressed;
+  }
+
+   //button call back, for debounce and long press test
+  void btnCallBack(void) {
+    int pressed = digitalRead(btnPin);
+    if (pressed == HIGH && btnState == btnNotPressed) {
+      pressStartTime = millis();
+      btnState = btnStartPressed;
+    } else switch(btnState) {
+      case btnInDebounce: //debounce timer currently disabled
+        if ((millis() - pressStartTime) >= debounceTimer && pressed == HIGH) {
+          btnState = btnStartPressed;
+        }
+        break;
+      case btnStartPressed://starts counting for long press. a shorter release results in a short press
+        if ((millis()-pressStartTime) >= longPressTimer && pressed == HIGH) {
+          btnState = btnLongPressed;
+        } else if ((millis()-pressStartTime) < longPressTimer && pressed == LOW) {
+          btnState = btnPressed;
+        }        
+        break;
+      case btnLongPressed:
+        if (pressed == LOW) {
+          btnState = btnNotPressed;
+        }
+        break;
+      case btnPressed:
+        if (pressed == LOW) {
+          btnState = btnNotPressed;
+        }
+    }
+  }
+  
+ // Returns only changed state outputs, otherwise gives 0
+  int btnOutput(void) {
+    if (btnState != lastBtnState || btnState == btnLongPressed) {
+      lastBtnState = btnState;   
+      switch(btnState) {
+        case btnNotPressed: return 0; break;
+        case btnInDebounce: return 1; break;
+        case btnStartPressed: return 2; break;
+        case btnPressed: return 3; break;
+        case btnLongPressed: return 4; break;
+      }
+    } //else return 0;
+  }
+};
+
+Button menuBtn(menuPin);
+Button enterBtn(enterPin);
+Button upBtn(upPin);
+Button downBtn(downPin);
+Button snoozeBtn(snoozePin);
+
+
+//setup runs at startup.
+//currently sets real time clock to compile time
 void setup() {
   Serial.begin(9600);
   Serial.println("Setting Up");
-  pinMode(snoozeBtn, INPUT);
-  pinMode(menuBtn, INPUT);
-  pinMode(upBtn, INPUT);
-  pinMode(downBtn, INPUT);
-  pinMode(enterBtn, INPUT);
   pinMode(LEDRed, OUTPUT);
   pinMode(LEDGreen, OUTPUT);
   pinMode(LEDBlue, OUTPUT);
-  Serial.println("Pins sorted");
   myRTC.begin();
   Serial.println("Clock started");
   setSyncProvider(myRTC.get);
-  Serial.println("Clock call sorted");
   if(timeStatus() != timeSet) {
     Serial.println("Unable to sync with the RTC");
   } else {
@@ -71,62 +159,60 @@ void setup() {
   delay(1000);
 }
 
+//main loop - keeps track of button presses, calls sunrise and sunset checks
 void loop() {
   time_t currentTime = now();
-  time_t
-  BPSnooze = digitalRead(snoozeBtn);
-  BPMenu = digitalRead(menuBtn);
-  BPUp = digitalRead(upBtn);
-  BPDown = digitalRead(downBtn);
-  BPEnter = digitalRead(enterBtn);
-  if(BPSnooze == HIGH && BUSnooze == false) {
-    snooze();
-    BUSnooze = true;
-    Serial.println("Snoozing.");
-  }
-  if (BPSnooze == LOW && BUSnooze == true) {
-    BUSnooze = false;
-  }
-  if(BPMenu == HIGH && BUMenu == false) {
+
+  snoozeBtn.btnCallBack();
+  menuBtn.btnCallBack();
+  upBtn.btnCallBack();
+  downBtn.btnCallBack();
+  enterBtn.btnCallBack();
+
+  BPSnooze = snoozeBtn.btnOutput();
+  BPMenu = menuBtn.btnOutput();
+  BPUp = upBtn.btnOutput();
+  BPDown = downBtn.btnOutput();
+  BPEnter = enterBtn.btnOutput();
+  
+  if (BPSnooze == 3) snooze();
+  if (BPSnooze == 4) snoozeLightSwitch();
+
+  if(BPMenu == 3 && menuMode == false) {
     Serial.println("Menu");
-    BUMenu = true;
+    menuMode = true;
+    timeoutTimer = millis();
   }
-  if (BPMenu == LOW && BUMenu == true) BUMenu = false;
-
-  if(BPUp == HIGH && BUUp == false){
-    sunRising = true;
-    sunSetting = false;
-    sunTime = 0;
-    Serial.println("Sun is Rising");
-    BUUp = true;
-  }
-  if (BPUp == LOW && BUUp == true) BUUp = false;
-  if(BPDown == HIGH && BUDown == false) {
-    sunSetting = true;
-    sunRising = false;
-    sunTime = sunMax;
-    Serial.print("Sun is Setting");
-    BUDown = true;
+  if (millis()-timeoutTimer > timeoutTime && menuMode == true) {
+    menuMode = false;
+    Serial.println("Menu timed out.");
   }
 
-  if (BPDown == LOW && BUDown == true) BUDown = false;
+  if(BPUp == 3) {
+    timeoutTimer = millis();
+    Serial.println("Up");
+  }
 
-  if (BPEnter == HIGH && BUEnter == false) {
+  if(BPDown == 3) {
+    timeoutTimer = millis();
+    Serial.print("Down");
+  }
+
+  if (BPEnter == 3 && menuMode == true) {
     Serial.println("Enter");
-    BUEnter = true;
+    menuMode = false;
   }
-  if (BPEnter == LOW && BUEnter == true) BUEnter = false;
 
-  if (clockWrite == 1000) {
+  if (clockWrite == 5000) {
     printDateTime(currentTime);
     clockWrite = 0;
   } else {
     clockWrite += 1;
   }
   sunAlarmCheck(currentTime);
-  delay(10);
+  delay(1);
 }
-//snooze button function
+//snooze button function, also functions as light switch when sun is not rising
 void snooze() {  
       if (sunRising == true && snoozing == false){
       sunTime -= (sunMax/sunriseLength*snoozeTime);
@@ -141,10 +227,19 @@ void snooze() {
       snoozing = false;
       writeSunColor();
       Serial.println("Goodnight!");
-    } else {
-      Serial.println("Nothing to snooze!");
-    }
+    } else snoozeLightSwitch();
 }
+
+void snoozeLightSwitch() {
+      if (lightOn) {
+        switchLEDs(0, 0, 0);
+        lightOn = false;
+      }
+      else if (!lightOn) {
+        switchLEDs(redMax, greenMax, blueMax);
+        lightOn = true;
+      }
+    }
 void menu() {
   char * menuItems[5] = {"SET TIME", "SUNRISE TIME", "SUNSET TIME", "SUNRISE LENGTH", "SUNSET LENGTH"};
 
@@ -155,34 +250,81 @@ void sunAlarmCheck(time_t currentTime) {
   int tNow = (hour(currentTime)*60+minute(currentTime));
   int sRT = (sunriseHour*60+sunriseMinute-sunriseLength);
   int sST = (sunsetHour*60+sunsetMinute-sunriseLength);
-  if (tNow == sRT && sunRising == false) {
+  if (clockWrite  == 500) {
+  Serial.print("Time now: ");
+  print0X(tNow/60, ':');
+  print0X(tNow%60, 0);
+  Serial.print(". Sunrise Start Time: ");
+  print0X(sRT/60, ':');
+  print0X(sRT%60, 0);
+  Serial.print(". Sunset Start Time: ");
+  print0X(sST/60, ':');
+  print0X(sST%60, 0);
+  Serial.println(".");
+  }
+  if (tNow == sRT && sunRising == false && lightOn == false) {
+    sunMilliTimer = millis();
     sunRising = true;
     sunSetting = false;
     sunTime = 0;
     Serial.println("Sun is Rising");
-  } else if (tNow == sST && sunSetting == false) {
+  } else if (tNow == sST && sunSetting == false && lightOn == true) {
+    sunMilliTimer = millis();
     sunSetting = true;
     sunRising = false;
     sunTime = sunMax;
-    Serial.print("Sun is Setting");
+    lightOn = false;
+    Serial.print("Sun is Setting ");
   }
-  int srTR;
-  int ssTR;
+  
   if(sunRising == true) {
-    srTR = sRT+sunriseLength-tNow;
-    sunrise(srTR);
+    long sTR = long(sunriseLength*60000)+sunMilliTimer-millis();   
+    sunrise(sTR);
   }
   if(sunSetting == true) {
-    ssTR = sST+sunsetLength-tNow;
-    sunset(ssTR);
+    long sTR = long(sunsetLength*60000)+sunMilliTimer-millis();
+    Serial.print("SunTime:");
+    Serial.println(sunTime);
+    sunset(sTR);
   }
 }
-//set sunset time
-void setSunriseTime() {
-
+//set suhnrise or sunset length, to maximum of 120 minutes
+//has a boolean to test for error message type
+int setSunLength(bool riseNotSet) {
+  timeoutTimer = millis();
+  bool entered = false;
+  float newSunLength = sunriseLength;
+  while (entered == false && millis()-timeoutTimer<timeoutTime) {
+    BPMenu = menuBtn.btnOutput();
+    BPUp = upBtn.btnOutput();
+    BPDown = downBtn.btnOutput();
+    BPEnter = enterBtn.btnOutput();
+    if (BPMenu ==3) return sunriseLength;
+    if (BPEnter == 3 || BPEnter == 4) {
+      sunriseLength = newSunLength;
+      menuMode = false;
+      entered == false;
+      return sunriseLength;
+    }
+    if (newSunLength < 120) {
+      if (BPUp == 3) newSunLength++;
+      else if (BPUp == 4) newSunLength++; 
+      else Serial.println("120 is maximum!");
+    }
+    if (newSunLength > -1) {
+      if  (BPDown == 3) newSunLength--;
+      else if (BPDown == 4) newSunLength--;
+      else {
+        if (riseNotSet) Serial.println("Sunrise is turned off.");
+        else Serial.println("Sunset is turned off.");
+      }   
+    }
+  }
 }
 
-//Color calculations based on formulas that are calibrated to a sunTime value of 65 maximum
+//Color calculations based on formulas that are calibrated to a sunTime value of 155 maximum
+//the -45 shifts the function to start the red curve at 0
+//red is the dimmest color led, so it needs maximum final brightness
 int colorCalcRed(float sunTime) {
   double x = sunTime;
   double mx = redMax;
@@ -191,7 +333,9 @@ int colorCalcRed(float sunTime) {
   int redVal = C;
   return max(0,redVal);
 } 
-
+//Color calculation for green. Needs to happen later than red. 
+//The -80 will determine how much later after sunrise start.
+//this will start turning the light orange (depends on greenMax)
 int colorCalcGreen(float sunTime) {
   double x = sunTime;
   double mx = greenMax;
@@ -200,7 +344,9 @@ int colorCalcGreen(float sunTime) {
   int greenVal = C;
   return max(0,greenVal);
 }
-
+//Color calculation for blue. Needs to happen later than green. 
+//The -90 will determine how much later after sunrise start.
+//this will start turning the light white (depends on blueMax)
 int colorCalcBlue(float sunTime) {
   double x = sunTime;
   double mx = blueMax;
@@ -209,39 +355,45 @@ int colorCalcBlue(float sunTime) {
   int blueVal = C;
   return max(0,blueVal);
 }
-//Writes the RGB values for sun color. Invert values if common anode LED are used (255-colorcalc)
+//Writes the RGB values for sun color.
 void writeSunColor() {
   int R = colorCalcRed(sunTime);
   int G = colorCalcGreen(sunTime);
   int B = colorCalcBlue(sunTime);
+  switchLEDs(R, G, B);
+}
+//Simple LED output Writer
+void switchLEDs (int R, int G, int B) {
   analogWrite(LEDRed, R);
   analogWrite(LEDGreen, G);
   analogWrite(LEDBlue, B);
-}
-
-void sunrise(int srTR) {
-  if(sunRising == true) {
-    if (sunTime<(sunMax+1)) {
+} 
+//checks for to make sure the sun is rising when it should be, and calculates the sun height
+void sunrise(long sTR) {
+  if(sunRising == true && lightOn == false) {
+    if (sunTime<sunMax) {
       writeSunColor();
-      sunTime = sunMax*(((float)srTR)/sunriseLength);
+      sunTime = sunMax*(1-(float(sTR)/60000)/sunriseLength);
       //Serial.print(sunTime);
     } else {
       sunRising = false;
-      snoozing = false;      
+      snoozing = false;
+      lightOn = true;      
       Serial.println();
       Serial.println("Sun has risen");
     }
   }
 }
-
-void sunset(int ssTR) {
-  if(sunSetting == true) {
+//checks to make sure the sun is setting when it should be and calculates the sun height
+void sunset(long sTR) {
+  if(sunSetting == true && lightOn == false) {
     if(sunTime>0) {
       writeSunColor();
-      sunTime = sunMax-(sunMax*(((float)ssTR)/sunsetLength));
+      sunTime = sunMax*((float(sTR)/60000)/sunsetLength);
       //Serial.print(sunTime);
     } else {
       sunSetting = false;
+      lightOn = false;
       Serial.println();
       Serial.println("Sun has set");
     }
@@ -251,10 +403,8 @@ void sunset(int ssTR) {
 void timeFormatter() {
   time_t t;
   tmElements_t tm;
-    
   String CDate = __DATE__;
   String CTime = __TIME__;
-
   tm.Year = ((CDate.substring(9,11).toInt())+30);
   if (CDate.substring(4,4) == " ") tm.Day = (('0'+CDate.substring(4)).toInt());
   else tm.Day = CDate.substring(4,6).toInt();
@@ -271,7 +421,7 @@ void timeFormatter() {
   tm.Minute = CTime.substring(3,5).toInt();
   tm.Second = CTime.substring(6).toInt();
   t = makeTime(tm);
-  myRTC.set(t);   // use the time_t value to ensure correct weekday is set
+  if (t>myRTC.get()) myRTC.set(t);
   setTime(t);
   Serial.print("RTC set to: ");
   printDateTime(t);
@@ -279,33 +429,30 @@ void timeFormatter() {
   
 }
 
-// print date and time to Serial
+// print date and time
 void printDateTime(time_t t) {
     printDate(t);
     Serial.print(' ');
-    printTime(t);
+    printTime24(t);
 }
 
-void printTime(time_t t) {
-    printI00(hour(t), ':');
-    printI00(minute(t), ':');
-    printI00(second(t), ' ');
+void printTime24(time_t t) {
+    print0X(hour(t), ':');
+    print0X(minute(t), ':');
+    print0X(second(t), ' ');
     Serial.println();
 }
 
 void printDate(time_t t) {
-    printI00(day(t), 0);
+    print0X(day(t), 0);
     Serial.print(" ");
     Serial.print(monthShortStr(month(t)));
     Serial.print(" ");
     Serial.print(year(t));
     Serial.print(" ");
 }
-
-// Print an integer in "00" format (with leading zero),
-// followed by a delimiter character to Serial.
-// Input value assumed to be between 0 and 99.
-void printI00(int val, char delim) {
+//formatter for single digit times
+void print0X(int val, char delim) {
     if (val < 10) Serial.print('0');
     Serial.print(val);
     if (delim > 0) Serial.print(delim);
