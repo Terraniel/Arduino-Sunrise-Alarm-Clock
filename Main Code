@@ -39,7 +39,6 @@ bool sunSetting;
 int timeCorrection = 4500;
 unsigned long sunMilliTimer = 0;
 //button, menu, and clock variables
-float snoozeTime = 5;
 bool snoozing = false;
 int BPSnooze;
 int BPMenu;
@@ -56,17 +55,17 @@ unsigned long timeoutTimer = 0;
 int timeoutTime = 3000;
 int clockWrite = 0;
 int menuIndex = 0;
-const String menuMenu[] = {"Set Sunrise Time","Set Sunrise Length","Set Sunset Time","Set Sunset Length","Set Time"};
 
 //creating a button class to handle debounce and long press functions
 class Button {
   private:
-    const int debounceTimer = 20;
-    const int longPressTimer = 1200;
+    const int debounceTimer = 10;
+    const int longPressTimer = 1000;
     int btnPin = -1;
     int btnState;
     int lastBtnState;
     unsigned long pressStartTime = 0;
+    bool latch = false;
   
     //Possible button states
   public: typedef enum ButtonStates {
@@ -76,21 +75,19 @@ class Button {
     btnPressed,
     btnLongPressed
   };
-
-    //button constructor
+  //button constructor
   Button(int pin) {
     btnPin = pin;
     pinMode(btnPin, INPUT);
     btnState = btnNotPressed;
     lastBtnState = btnNotPressed;
   }
-
-   //button call back, for debounce and long press test
+  //button call back, for debounce and long press test
   void btnCallBack(void) {
     int pressed = digitalRead(btnPin);
     if (pressed == HIGH && btnState == btnNotPressed) {
       pressStartTime = millis();
-      btnState = btnStartPressed;
+      btnState = btnInDebounce;
     } else switch(btnState) {
       case btnInDebounce: //debounce timer currently disabled
         if ((millis() - pressStartTime) >= debounceTimer && pressed == HIGH) {
@@ -115,19 +112,23 @@ class Button {
         }
     }
   }
-  
- // Returns only changed state outputs, otherwise gives 0
+  // Returns only changed state outputs, otherwise gives btnNotPressed
   int btnOutput(void) {
     if (btnState != lastBtnState || btnState == btnLongPressed) {
-      lastBtnState = btnState;   
-      switch(btnState) {
-        case btnNotPressed: return 0; break;
-        case btnInDebounce: return 1; break;
-        case btnStartPressed: return 2; break;
-        case btnPressed: return 3; break;
-        case btnLongPressed: return 4; break;
-      }
-    } //else return 0;
+      lastBtnState = btnState;
+      if (btnState == btnNotPressed) latch = false; 
+      return btnState;
+    } else if (btnState == btnNotPressed) {
+      latch = false;
+      return btnNotPressed;
+    }
+  }
+  void btnLatch(bool L) {
+    latch = L;
+  }
+  //for comparison and latching purposes
+  bool btnLatchOutput(void) {
+    return latch;
   }
 };
 
@@ -162,7 +163,34 @@ void setup() {
 //main loop - keeps track of button presses, calls sunrise and sunset checks
 void loop() {
   time_t currentTime = now();
+  buttonCheck();
 
+  if (BPSnooze == Button::ButtonStates::btnPressed) snoozeLightSwitch();
+  if (BPSnooze == Button::ButtonStates::btnLongPressed && !snoozeBtn.btnLatchOutput()) {
+    snoozeBtn.btnLatch(true);
+    Serial.println("LongSnooze");
+    snooze();
+  }
+
+  if(BPMenu == Button::ButtonStates::btnPressed && !menuMode) {
+    menuMode = true;
+    timeoutTimer = millis();
+    menu();
+  }
+
+
+
+  if (clockWrite == 5000 && !menuMode) {
+    printDateTime(currentTime);
+    clockWrite = 0;
+  } else {
+    clockWrite += 1;
+  }
+  sunAlarmCheck(currentTime);
+  delay(1);
+}
+//quick button checker
+void buttonCheck(void) {
   snoozeBtn.btnCallBack();
   menuBtn.btnCallBack();
   upBtn.btnCallBack();
@@ -174,62 +202,24 @@ void loop() {
   BPUp = upBtn.btnOutput();
   BPDown = downBtn.btnOutput();
   BPEnter = enterBtn.btnOutput();
-  
-  if (BPSnooze == 3) snooze();
-  if (BPSnooze == 4) snoozeLightSwitch();
-
-  if(BPMenu == 3 && menuMode == false) {
-    Serial.println("Menu");
-    menuMode = true;
-    timeoutTimer = millis();
-  }
-  if (millis()-timeoutTimer > timeoutTime && menuMode == true) {
-    menuMode = false;
-    Serial.println("Menu timed out.");
-  }
-
-  if(BPUp == 3) {
-    timeoutTimer = millis();
-    Serial.println("Up");
-  }
-
-  if(BPDown == 3) {
-    timeoutTimer = millis();
-    Serial.print("Down");
-  }
-
-  if (BPEnter == 3 && menuMode == true) {
-    Serial.println("Enter");
-    menuMode = false;
-  }
-
-  if (clockWrite == 5000) {
-    printDateTime(currentTime);
-    clockWrite = 0;
-  } else {
-    clockWrite += 1;
-  }
-  sunAlarmCheck(currentTime);
-  delay(1);
 }
 //snooze button function, also functions as light switch when sun is not rising
-void snooze() {  
-      if (sunRising == true && snoozing == false){
-      sunTime -= (sunMax/sunriseLength*snoozeTime);
-      snoozing = true;
-      Serial.println();
-      Serial.println("Snoozing");
-    } else if (sunRising == true && snoozing == false) {
-      Serial.println("Already snoozing!");
-    } else if (sunSetting == true && snoozing == false) {
-      sunTime = 0;
-      sunSetting = false;
-      snoozing = false;
-      writeSunColor();
-      Serial.println("Goodnight!");
-    } else snoozeLightSwitch();
+void snooze() {
+  if (sunRising && !snoozing){
+    snoozing = true;
+    Serial.println();
+    Serial.println("Snoozing");
+  } else if (sunRising && !snoozing) {
+    Serial.println("Already snoozing!");
+  } else if (sunSetting && !snoozing) {
+    sunTime = 0;
+    sunSetting = false;
+    snoozing = false;
+    writeSunColor();
+    Serial.println("Goodnight!");
+  } else snoozeLightSwitch();
 }
-
+//snooze button function to use long press as a light switch during sunrise or sunset
 void snoozeLightSwitch() {
       if (lightOn) {
         switchLEDs(0, 0, 0);
@@ -241,8 +231,58 @@ void snoozeLightSwitch() {
       }
     }
 void menu() {
-  char * menuItems[5] = {"SET TIME", "SUNRISE TIME", "SUNSET TIME", "SUNRISE LENGTH", "SUNSET LENGTH"};
 
+  String menuItems[5] = {"Set Time", "Set Sunrise Time", "Set Sunrise Length", "Set Sunset Time", "Set Sunrise Length"};
+  buttonCheck();  
+  if(BPUp == Button::ButtonStates::btnPressed) {
+    timeoutTimer = millis();
+    if(menuIndex >= 4) menuIndex = 0;
+    else menuIndex++;
+    Serial.println(menuItems[menuIndex]);
+  }
+
+  if(BPDown == Button::ButtonStates::btnPressed) {
+    timeoutTimer = millis();
+    if(menuIndex <= 0) menuIndex = 4;
+    else menuIndex--;
+    Serial.print(menuItems[menuIndex]);
+  }
+  if (millis()-timeoutTimer > timeoutTime && menuMode) {
+    menuMode = false;
+    Serial.println("Menu timed out.");
+    return;
+  }
+  if (BPEnter == Button::ButtonStates::btnPressed && menuMode) {
+    switch (menuIndex) {
+      case 0:
+        setClockTime();
+        break;
+      case 1:
+        setSunClock(true);
+        break;
+      case 2:
+        setSunLength(true);
+        break;
+      case 3:
+        setSunClock(false);
+        break;
+      case 4:
+        setSunLength(false);
+        break;
+    }
+    Serial.println("Enter");
+    menuMode = false;
+  }  
+
+}
+//Sets Clock date and time
+void setClockTime(void) {
+  Serial.println("Clock Time cannot be set yet!");//build a clock time setter
+}
+//Sets sunset and sunrise times (pass true for sunrise, false for sunset)
+void setSunClock(bool riseNotSet) {
+  if (riseNotSet) Serial.println("Sunrise cannot be set this way yet!");
+  else Serial.println("Sunset cannot be set this way yet!");
 }
 //checks current hour and minute against setpoints to decide if a sunrise or sunset needs to be started
 //adjusts for sunset and sunrise lengths
@@ -262,13 +302,13 @@ void sunAlarmCheck(time_t currentTime) {
   print0X(sST%60, 0);
   Serial.println(".");
   }
-  if (tNow == sRT && sunRising == false && lightOn == false) {
+  if (tNow == sRT && !sunRising && !lightOn && sunriseLength > 0) {
     sunMilliTimer = millis();
     sunRising = true;
     sunSetting = false;
     sunTime = 0;
     Serial.println("Sun is Rising");
-  } else if (tNow == sST && sunSetting == false && lightOn == true) {
+  } else if (tNow == sST && !sunSetting && lightOn) {
     sunMilliTimer = millis();
     sunSetting = true;
     sunRising = false;
@@ -277,47 +317,50 @@ void sunAlarmCheck(time_t currentTime) {
     Serial.print("Sun is Setting ");
   }
   
-  if(sunRising == true) {
+  if(sunRising && !lightOn && sunsetLength > 0) {
     long sTR = long(sunriseLength*60000)+sunMilliTimer-millis();   
     sunrise(sTR);
   }
-  if(sunSetting == true) {
+  if(sunSetting && !lightOn) {
     long sTR = long(sunsetLength*60000)+sunMilliTimer-millis();
     Serial.print("SunTime:");
     Serial.println(sunTime);
     sunset(sTR);
   }
 }
-//set suhnrise or sunset length, to maximum of 120 minutes
+//set sunrise or sunset length, to maximum of 120 minutes
 //has a boolean to test for error message type
-int setSunLength(bool riseNotSet) {
+void setSunLength(bool riseNotSet) {
   timeoutTimer = millis();
   bool entered = false;
-  float newSunLength = sunriseLength;
+  float newSunLength;
+  if (riseNotSet) newSunLength = sunriseLength;
+  else float newSunLength = sunsetLength;
   while (entered == false && millis()-timeoutTimer<timeoutTime) {
-    BPMenu = menuBtn.btnOutput();
-    BPUp = upBtn.btnOutput();
-    BPDown = downBtn.btnOutput();
-    BPEnter = enterBtn.btnOutput();
-    if (BPMenu ==3) return sunriseLength;
-    if (BPEnter == 3 || BPEnter == 4) {
-      sunriseLength = newSunLength;
+    buttonCheck();
+    if (BPMenu == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      return;
+    }
+    if (BPEnter == Button::ButtonStates::btnPressed) {
+      if (riseNotSet)sunriseLength = newSunLength;
+      else if (!riseNotSet) sunsetLength = newSunLength;
       menuMode = false;
-      entered == false;
-      return sunriseLength;
+      entered == true;
+      return;
     }
     if (newSunLength < 120) {
-      if (BPUp == 3) newSunLength++;
-      else if (BPUp == 4) newSunLength++; 
-      else Serial.println("120 is maximum!");
+      if (BPUp == Button::ButtonStates::btnPressed) newSunLength++;
+      else if (BPUp == Button::ButtonStates::btnLongPressed) newSunLength++; 
+      else Serial.println("120 minutes is maximum!");
     }
-    if (newSunLength > -1) {
-      if  (BPDown == 3) newSunLength--;
-      else if (BPDown == 4) newSunLength--;
+    if (newSunLength > 0) {
+      if  (BPDown == Button::ButtonStates::btnPressed) newSunLength--;
+      else if (BPDown == Button::ButtonStates::btnLongPressed) newSunLength--;
       else {
         if (riseNotSet) Serial.println("Sunrise is turned off.");
         else Serial.println("Sunset is turned off.");
-      }   
+        }   
     }
   }
 }
@@ -373,7 +416,8 @@ void sunrise(long sTR) {
   if(sunRising == true && lightOn == false) {
     if (sunTime<sunMax) {
       writeSunColor();
-      sunTime = sunMax*(1-(float(sTR)/60000)/sunriseLength);
+      if (snoozing) sunTime = sunMax*(1.00-(float(sTR+10)/60000)/sunriseLength); 
+      else sunTime = sunMax*(1-(float(sTR)/60000)/sunriseLength);
       //Serial.print(sunTime);
     } else {
       sunRising = false;
@@ -399,7 +443,7 @@ void sunset(long sTR) {
     }
   }
 }
-
+//uses time object to get, set and write the time to/from rtc
 void timeFormatter() {
   time_t t;
   tmElements_t tm;
