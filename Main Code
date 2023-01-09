@@ -26,17 +26,17 @@ const int greenMax = 100;
 const int blueMax = 80;
 bool lightOn = false;
 //sunset, and sunset variables
-const float sunMax = 149;
-float sunTime;
+const int sunMax = 149;
+
 int sunriseHour = 8;
-int sunriseMinute = 00;
-float sunriseLength = 60;
+int sunriseMinute = 0;
+int sunriseLength = 60;
 bool sunRising;
 int sunsetHour = 21;
 int sunsetMinute = 40;
-float sunsetLength = 60;
+float sunTime = 0;
+int sunsetLength = 60;
 bool sunSetting;
-int timeCorrection = 4500;
 unsigned long sunMilliTimer = 0;
 //button, menu, and clock variables
 bool snoozing = false;
@@ -52,7 +52,7 @@ bool BUDown = false;
 bool BUEnter = false;
 bool menuMode = false;
 unsigned long timeoutTimer = 0;
-int timeoutTime = 3000;
+int timeoutTime = 10000;
 int clockWrite = 0;
 int menuIndex = 0;
 
@@ -231,58 +231,201 @@ void snoozeLightSwitch() {
       }
     }
 void menu() {
-
-  String menuItems[5] = {"Set Time", "Set Sunrise Time", "Set Sunrise Length", "Set Sunset Time", "Set Sunrise Length"};
-  buttonCheck();  
-  if(BPUp == Button::ButtonStates::btnPressed) {
-    timeoutTimer = millis();
-    if(menuIndex >= 4) menuIndex = 0;
-    else menuIndex++;
-    Serial.println(menuItems[menuIndex]);
-  }
-
-  if(BPDown == Button::ButtonStates::btnPressed) {
-    timeoutTimer = millis();
-    if(menuIndex <= 0) menuIndex = 4;
-    else menuIndex--;
-    Serial.print(menuItems[menuIndex]);
-  }
-  if (millis()-timeoutTimer > timeoutTime && menuMode) {
-    menuMode = false;
-    Serial.println("Menu timed out.");
-    return;
-  }
-  if (BPEnter == Button::ButtonStates::btnPressed && menuMode) {
-    switch (menuIndex) {
-      case 0:
-        setClockTime();
-        break;
-      case 1:
-        setSunClock(true);
-        break;
-      case 2:
-        setSunLength(true);
-        break;
-      case 3:
-        setSunClock(false);
-        break;
-      case 4:
+  Serial.println("Menu");
+  String menuItems[5] = {"Set Time", "Set Sunrise Time", "Set Sunrise Length", "Set Sunset Time", "Set Sunset Length"};
+  Serial.println(menuItems[menuIndex]);
+  while (menuMode){
+    buttonCheck();  
+    if(BPUp == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      if(menuIndex >= 4) menuIndex = 0;
+      else menuIndex++;
+      Serial.println(menuItems[menuIndex]);
+    }
+    if(BPDown == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      if(menuIndex <= 0) menuIndex = 4;
+      else menuIndex--;
+      Serial.println(menuItems[menuIndex]);
+    }
+    if (BPEnter == Button::ButtonStates::btnPressed && menuMode) {
+      switch (menuIndex) {
+        case 0:
+          setClockTime();
+          break;
+        case 1:
+          setSunClock(true);
+          break;
+        case 2:
+          setSunLength(true);
+          break;
+        case 3:
+          setSunClock(false);
+          break;
+        case 4:
         setSunLength(false);
         break;
+      }
+      menuMode = false;
     }
-    Serial.println("Enter");
-    menuMode = false;
-  }  
-
+    if (millis()-timeoutTimer > timeoutTime && menuMode) {
+      menuMode = false;
+      Serial.println("Menu timed out.");
+      return;
+    }  
+  }
 }
 //Sets Clock date and time
 void setClockTime(void) {
   Serial.println("Clock Time cannot be set yet!");//build a clock time setter
+  time_t ct = now();
+  int timeDate[5] = {ct.hour(), ct.minute(), ct.day(), ct.month(), ct.year()};
+  String tn[5] = {"Hour: ","Minute: ","Day: ","Month: ","Year: "};
+  String msn[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  bool entered = false;
+  int tIndex = 0;
+  Serial.print("Hour: ");
+  Serial.println(timeDate[0]);
+    while (entered == false && millis()-timeoutTimer<timeoutTime) {
+    buttonCheck();
+    if (BPMenu == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      return;
+    }
+    if (BPEnter == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      if (tIndex == 4) tIndex = 0;
+      else tIndex++;
+      Serial.print(tn[tIndex]);
+      if (tIndex != 3) Serial.println(timeDate[tIndex]);
+      else {
+        Serial.println(msn[timeDate[tIndex]]);
+      }
+    }
+    if (BPEnter == Button::ButtonStates::btnLongPressed) {
+        Serial.print("Date and time set to: ");
+        printDateTime();
+        menuMode = false;
+        entered = true;
+        return;
+    }
+    if (BPUp == Button::ButtonStates::btnPressed || BPUp == Button::ButtonStates::btnLongPressed) {
+      timeoutTimer = millis();
+      if (hNM){
+        if (nSH >= 23) nSH = 0;
+        else nSH++; 
+      } else {
+        if (nSM >= 59) nSM = 0;
+        else nSM++;          
+      }
+      if (riseNotSet) Serial.print("Sunrise");
+      else Serial.print("Sunset");
+      Serial.print(" new time:");
+      print0X(nSH, ':');
+      print0X(nSM, 0);
+      Serial.println();
+    }
+    if (BPDown == Button::ButtonStates::btnPressed || BPDown == Button::ButtonStates::btnLongPressed) {
+      timeoutTimer = millis();
+      if (hNM){
+        if (nSH <= 0) nSH = 23;
+        else nSH--; 
+      } else {
+        if (nSM <= 0) nSM = 59;
+        else nSM--;          
+      }
+      if (riseNotSet) Serial.print("Sunrise");
+      else Serial.print("Sunset");
+      Serial.print(" new time:");
+      print0X(nSH, ':');
+      print0X(nSM, 0);
+      Serial.println();
+    }
+  }
+
+
 }
 //Sets sunset and sunrise times (pass true for sunrise, false for sunset)
 void setSunClock(bool riseNotSet) {
-  if (riseNotSet) Serial.println("Sunrise cannot be set this way yet!");
-  else Serial.println("Sunset cannot be set this way yet!");
+  bool entered = false;
+  bool hNM = true;
+  int nSH = 0;
+  int nSM = 0;
+  if (riseNotSet) {
+    nSH = sunriseHour;
+    nSM = sunriseMinute;
+    Serial.print("Sunrise time currently: ");
+  }
+  else {
+    nSH = sunsetHour;
+    nSM = sunsetMinute;
+    Serial.print("Sunset time currently: ");
+  }
+  print0X(nSH, ':');
+  print0X(nSM, 0);
+  Serial.println();
+  while (entered == false && millis()-timeoutTimer<timeoutTime) {
+    buttonCheck();
+    if (BPMenu == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      return;
+    }
+    if (BPEnter == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      if (hNM) hNM = false;
+      else hNM = true;
+    }
+    if (BPEnter == Button::ButtonStates::btnLongPressed) {
+        if (riseNotSet) {
+          sunriseHour = nSH;
+          sunriseMinute = nSM;
+          Serial.print("Sunrise");
+        } else {
+          sunsetHour = nSH;
+          sunsetMinute = nSM;
+          Serial.print("Sunset");          
+        }
+        Serial.print(" time set to: ");
+        print0X(nSH, ':');
+        print0X(nSM, 0);
+        Serial.println();
+        menuMode = false;
+        entered = true;
+        return;
+    }
+    if (BPUp == Button::ButtonStates::btnPressed || BPUp == Button::ButtonStates::btnLongPressed) {
+      timeoutTimer = millis();
+      if (hNM){
+        if (nSH >= 23) nSH = 0;
+        else nSH++; 
+      } else {
+        if (nSM >= 59) nSM = 0;
+        else nSM++;          
+      }
+      if (riseNotSet) Serial.print("Sunrise");
+      else Serial.print("Sunset");
+      Serial.print(" new time:");
+      print0X(nSH, ':');
+      print0X(nSM, 0);
+      Serial.println();
+    }
+    if (BPDown == Button::ButtonStates::btnPressed || BPDown == Button::ButtonStates::btnLongPressed) {
+      timeoutTimer = millis();
+      if (hNM){
+        if (nSH <= 0) nSH = 23;
+        else nSH--; 
+      } else {
+        if (nSM <= 0) nSM = 59;
+        else nSM--;          
+      }
+      if (riseNotSet) Serial.print("Sunrise");
+      else Serial.print("Sunset");
+      Serial.print(" new time:");
+      print0X(nSH, ':');
+      print0X(nSM, 0);
+      Serial.println();
+    }
+  }
 }
 //checks current hour and minute against setpoints to decide if a sunrise or sunset needs to be started
 //adjusts for sunset and sunrise lengths
@@ -334,8 +477,15 @@ void setSunLength(bool riseNotSet) {
   timeoutTimer = millis();
   bool entered = false;
   float newSunLength;
-  if (riseNotSet) newSunLength = sunriseLength;
-  else float newSunLength = sunsetLength;
+  if (riseNotSet) {
+    newSunLength = float(sunriseLength);
+    Serial.print("Sunrise time in minutes: ");
+  }
+  else {
+    newSunLength = sunsetLength;
+    Serial.print("Sunset time in minutes:");
+  }
+  Serial.println(newSunLength);
   while (entered == false && millis()-timeoutTimer<timeoutTime) {
     buttonCheck();
     if (BPMenu == Button::ButtonStates::btnPressed) {
@@ -343,25 +493,57 @@ void setSunLength(bool riseNotSet) {
       return;
     }
     if (BPEnter == Button::ButtonStates::btnPressed) {
-      if (riseNotSet)sunriseLength = newSunLength;
-      else if (!riseNotSet) sunsetLength = newSunLength;
+      if (riseNotSet) {
+        sunriseLength = int(newSunLength);
+        Serial.print("Sunrise");
+      }
+      else if (!riseNotSet) {
+        sunsetLength = newSunLength;
+        Serial.print("Sunset");
+      }
+      Serial.print(" length set to: ");
+      Serial.print(newSunLength);
       menuMode = false;
-      entered == true;
+      entered = true;
       return;
     }
     if (newSunLength < 120) {
-      if (BPUp == Button::ButtonStates::btnPressed) newSunLength++;
-      else if (BPUp == Button::ButtonStates::btnLongPressed) newSunLength++; 
-      else Serial.println("120 minutes is maximum!");
+      if (BPUp == Button::ButtonStates::btnPressed) {
+        timeoutTimer = millis();
+        newSunLength++;
+        Serial.print("Sunrise length, in minutes: ");
+        Serial.println(newSunLength);
+      }
+      else if (BPUp == Button::ButtonStates::btnLongPressed) {
+        timeoutTimer = millis();
+        newSunLength++;
+        Serial.print("Sunrise length, in minutes: ");
+        Serial.println(newSunLength);
+      }
+    } else if (BPUp == Button::ButtonStates::btnLongPressed || BPUp == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      Serial.println("120 minutes is maximum!");
     }
+    
     if (newSunLength > 0) {
-      if  (BPDown == Button::ButtonStates::btnPressed) newSunLength--;
-      else if (BPDown == Button::ButtonStates::btnLongPressed) newSunLength--;
-      else {
-        if (riseNotSet) Serial.println("Sunrise is turned off.");
-        else Serial.println("Sunset is turned off.");
-        }   
-    }
+      if  (BPDown == Button::ButtonStates::btnPressed) {
+        timeoutTimer = millis();
+        newSunLength--;
+        Serial.print("Sunrise length, in minutes: ");
+        Serial.println(newSunLength);
+      }
+      else if (BPDown == Button::ButtonStates::btnLongPressed) {
+        timeoutTimer = millis();
+        newSunLength--;
+        Serial.print("Sunrise length, in minutes: ");
+        Serial.println(newSunLength);
+      }
+    } else if (BPDown == Button::ButtonStates::btnLongPressed || BPDown == Button::ButtonStates::btnPressed) {
+      timeoutTimer = millis();
+      if (riseNotSet) Serial.println("Sunrise is turned off.");
+      else Serial.println("Sunset is turned off.");
+    }   
+    
   }
 }
 
@@ -416,8 +598,8 @@ void sunrise(long sTR) {
   if(sunRising == true && lightOn == false) {
     if (sunTime<sunMax) {
       writeSunColor();
-      if (snoozing) sunTime = sunMax*(1.00-(float(sTR+10)/60000)/sunriseLength); 
-      else sunTime = sunMax*(1-(float(sTR)/60000)/sunriseLength);
+      if (snoozing) sunTime = float(sunMax)*(1.00-(float(sTR+10)/60000)/float(sunriseLength)); 
+      else sunTime = float(sunMax)*(1-(float(sTR)/60000)/float(sunriseLength));
       //Serial.print(sunTime);
     } else {
       sunRising = false;
@@ -433,7 +615,7 @@ void sunset(long sTR) {
   if(sunSetting == true && lightOn == false) {
     if(sunTime>0) {
       writeSunColor();
-      sunTime = sunMax*((float(sTR)/60000)/sunsetLength);
+      sunTime = float(sunMax)*((float(sTR)/60000)/float(sunsetLength));
       //Serial.print(sunTime);
     } else {
       sunSetting = false;
@@ -453,9 +635,9 @@ void timeFormatter() {
   if (CDate.substring(4,4) == " ") tm.Day = (('0'+CDate.substring(4)).toInt());
   else tm.Day = CDate.substring(4,6).toInt();
   String CMo = CDate.substring(0,3);
-  String dateArray[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  String msn[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
   for (int i=0; i<13; i++) {
-    if (dateArray[i] == CMo) {
+    if (msn[i] == CMo) {
         tm.Month = (i+1);
       } else if (i ==13) {
       Serial.println("Month is undefined");
