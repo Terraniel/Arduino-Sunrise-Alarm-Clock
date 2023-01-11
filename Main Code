@@ -234,6 +234,7 @@ void buttonCheck(void) {
 void printClock(time_t t) {
   char* L1;
   char* L2;
+  char* L3;
   if (ampmN24h) {
     makeTimeAMPM(t);
     L1 =  time12;
@@ -243,10 +244,14 @@ void printClock(time_t t) {
   }
   makeDate(t);
   L2 = date;
+  if (sunRising) L3 = "Sun is rising!:)";
+  else if (sunSetting) L3 = "Sun is setting. ";
+  else L3 = "                ";
   u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
   u8x8.drawString(0, 0, L1);
   u8x8.setFont(u8x8_font_chroma48medium8_r);
   u8x8.drawString(2, 2, L2);
+  u8x8.drawString(0, 3, L3);
 
 }
 //snooze button function, also functions as light switch when sun is not rising
@@ -346,13 +351,29 @@ void setClockTime(void) {
     L1 = tn[index];
     u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
     u8x8.drawString(0, 0, L1);
-    if (index != 5 && index != 3) { 
+    if (index != 5 && index != 3) {
+      if (index == 0 && timeDate[5] == 1) {
+        if (timeDate[0]>12) {
+          numVals[0] = chMkr((timeDate[0]-12)/10, ' ');
+          numVals[1] = chMkr((timeDate[0]-12)%10, '0');
+        } else if (timeDate[0] == 0) {
+          numVals[0] = '1';
+          numVals[1] = '2';
+        } else {
+          numVals[0] = chMkr((timeDate[0])/10, ' ');
+          numVals[1] = chMkr((timeDate[0])%10, '0');      
+        }
+        if (timeDate[0] < 12) numVals[2] = 'a';
+        else numVals[2] = 'p';   
+        numVals[3] = 'm';
+      } else { 
       numVals[0] = chMkr(timeDate[index]/1000,' ');
       if (index == 2) numVals[1] = chMkr((timeDate[index]%1000)/100, '0');
       else numVals[1] = ' ';
       if (index == 4) numVals[2] = chMkr((timeDate[index]%100)/10, '0');
       else numVals[2] = chMkr((timeDate[index]%100)/10, ' ');
       numVals[3] = chMkr((timeDate[index]%10), '0');
+      }
       L2 = numVals;
       u8x8.drawString(4,2, L2);
     } else if (index == 3) {
@@ -610,7 +631,7 @@ void setSunLength(bool riseNotSet) {
       u8x8.drawString(0,1, L2);
       u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
       u8x8.drawString(3, 2, L3); 
-      delay(1200);
+      delay(1200);      
       u8x8.clearDisplay();      
       menuMode = false;
       entered = true;
