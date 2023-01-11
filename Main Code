@@ -7,9 +7,19 @@
 #include <DS3232RTC.h>
 #include <Wire.h>
 #include <time.h>
+//Screen Libraries required
+#include <Arduino.h>
+#include <U8x8lib.h>
+
+//#ifdef U8X8_HAVE_HW_SPI
+//#include <SPI.h>
+//#endif
 
 //creating real time clock object
 DS3232RTC myRTC;
+
+//initializing screen
+U8X8_SH1106_128X32_VISIONOX_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 
 //pins assignments
 const int snoozePin = 2;
@@ -55,6 +65,11 @@ unsigned long timeoutTimer = 0;
 int timeoutTime = 10000;
 int clockWrite = 0;
 int menuIndex = 0;
+char time12[8] = "";
+char time24[6] = "";
+char date[12] = "";
+bool ampmN24h = true;
+
 
 //creating a button class to handle debounce and long press functions
 class Button {
@@ -143,7 +158,10 @@ Button snoozeBtn(snoozePin);
 //currently sets real time clock to compile time
 void setup() {
   Serial.begin(9600);
+  u8x8.begin();
   Serial.println("Setting Up");
+  Serial.println(__TIME__);
+  Serial.println(__DATE__);
   pinMode(LEDRed, OUTPUT);
   pinMode(LEDGreen, OUTPUT);
   pinMode(LEDBlue, OUTPUT);
@@ -156,8 +174,10 @@ void setup() {
     Serial.println("RTC has set the system time");
     Serial.println("Setup Complete");
   }
-  timeFormatter();
-  delay(1000);
+  timeInit();
+  time12[7] ='\0';
+  time24[5] = '\0';
+  date[11] = '\0';
 }
 
 //main loop - keeps track of button presses, calls sunrise and sunset checks
@@ -177,17 +197,24 @@ void loop() {
     timeoutTimer = millis();
     menu();
   }
+  printScreen(currentTime);
+  
 
 
 
-  if (clockWrite == 5000 && !menuMode) {
-    printDateTime(currentTime);
+  if (clockWrite == 500 && !menuMode) {
+    printDateTime(currentTime, true);
+
     clockWrite = 0;
   } else {
     clockWrite += 1;
   }
   sunAlarmCheck(currentTime);
   delay(1);
+}
+//Screen printing handler
+void printScreen (time_t t) {
+  if (!menuMode) printClock(t);
 }
 //quick button checker
 void buttonCheck(void) {
@@ -202,6 +229,25 @@ void buttonCheck(void) {
   BPUp = upBtn.btnOutput();
   BPDown = downBtn.btnOutput();
   BPEnter = enterBtn.btnOutput();
+}
+//Clock Screen Function
+void printClock(time_t t) {
+  char* L1;
+  char* L2;
+  if (ampmN24h) {
+    makeTimeAMPM(t);
+    L1 =  time12;
+  } else {
+    makeTime24(t);
+    L1 = time24;    
+  }
+  makeDate(t);
+  L2 = date;
+  u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+  u8x8.drawString(0, 0, L1);
+  u8x8.setFont(u8x8_font_chroma48medium8_r);
+  u8x8.drawString(2, 2, L2);
+
 }
 //snooze button function, also functions as light switch when sun is not rising
 void snooze() {
@@ -230,23 +276,27 @@ void snoozeLightSwitch() {
         lightOn = true;
       }
     }
+//The main settings menu for navigating to different adustments
 void menu() {
-  Serial.println("Menu");
-  String menuItems[5] = {"Set Time", "Set Sunrise Time", "Set Sunrise Length", "Set Sunset Time", "Set Sunset Length"};
-  Serial.println(menuItems[menuIndex]);
+  u8x8.clearDisplay();
+  u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+  u8x8.drawString(2, 0, "Menu");
+  char * L1;
+  char menuItems[5][17] = {"   Set Clock    ", "  Sunrise Time  ", " Sunrise Length ", "  Sunset Time   ", " Sunset Length  "};
   while (menuMode){
+    L1 = menuItems[menuIndex];
+    u8x8.setFont(u8x8_font_chroma48medium8_r);
+    u8x8.drawString(0, 3, L1);
     buttonCheck();  
     if(BPUp == Button::ButtonStates::btnPressed) {
       timeoutTimer = millis();
       if(menuIndex >= 4) menuIndex = 0;
       else menuIndex++;
-      Serial.println(menuItems[menuIndex]);
     }
     if(BPDown == Button::ButtonStates::btnPressed) {
       timeoutTimer = millis();
       if(menuIndex <= 0) menuIndex = 4;
       else menuIndex--;
-      Serial.println(menuItems[menuIndex]);
     }
     if (BPEnter == Button::ButtonStates::btnPressed && menuMode) {
       switch (menuIndex) {
@@ -269,84 +319,109 @@ void menu() {
       menuMode = false;
     }
     if (millis()-timeoutTimer > timeoutTime && menuMode) {
+      u8x8.clearDisplay();
       menuMode = false;
-      Serial.println("Menu timed out.");
       return;
     }  
   }
 }
 //Sets Clock date and time
 void setClockTime(void) {
-  Serial.println("Clock Time cannot be set yet!");//build a clock time setter
+  u8x8.clearDisplay();
   time_t ct = now();
-  int timeDate[5] = {ct.hour(), ct.minute(), ct.day(), ct.month(), ct.year()};
-  String tn[5] = {"Hour: ","Minute: ","Day: ","Month: ","Year: "};
-  String msn[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  tmElements_t tm;
+  char * L1;
+  char * L2;
+  char numVals[5]="";
+  int timeDate[6] = {hour(ct), minute(ct), year(ct), month(ct), day(ct), 0};
+  int tdLimit[6][2] = {{0,23},{0,59},{2023,10000},{1,12},{1,31},{0,1}};
+  if (ampmN24h) timeDate[5] = 1;
+  int index = 0;
+  const char tn[6][9] = {"Hour:   ","Minute: ","Year:   ","Month:  ","Day:    ","24H/AmPm"};
+  const char msn[12][4] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  const int doms[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
   bool entered = false;
-  int tIndex = 0;
-  Serial.print("Hour: ");
-  Serial.println(timeDate[0]);
-    while (entered == false && millis()-timeoutTimer<timeoutTime) {
+  while (entered == false) {
+  //putting in the values for the display with formatting
+    L1 = tn[index];
+    u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+    u8x8.drawString(0, 0, L1);
+    if (index != 5 && index != 3) { 
+      numVals[0] = chMkr(timeDate[index]/1000,' ');
+      if (index == 2) numVals[1] = chMkr((timeDate[index]%1000)/100, '0');
+      else numVals[1] = ' ';
+      if (index == 4) numVals[2] = chMkr((timeDate[index]%100)/10, '0');
+      else numVals[2] = chMkr((timeDate[index]%100)/10, ' ');
+      numVals[3] = chMkr((timeDate[index]%10), '0');
+      L2 = numVals;
+      u8x8.drawString(4,2, L2);
+    } else if (index == 3) {
+      L2 = msn[timeDate[3]-1];
+      u8x8.drawString(5,2, L2);
+    } else {
+      if (timeDate[5] == 0) L2 = "24h Time";
+      else L2 = "12h Time";
+      u8x8.drawString(0,2, L2);
+    }
+    //leap year and calendar month controls
+    if (timeDate[2]%4 == 0) tdLimit[4][1] = 28;
+    else tdLimit[4][1] = doms[timeDate[3]];
     buttonCheck();
+    //menu button should go back
     if (BPMenu == Button::ButtonStates::btnPressed) {
+      u8x8.clearDisplay();
       timeoutTimer = millis();
       return;
     }
+    //enter button iterates to the next L2 to change
     if (BPEnter == Button::ButtonStates::btnPressed) {
       timeoutTimer = millis();
-      if (tIndex == 4) tIndex = 0;
-      else tIndex++;
-      Serial.print(tn[tIndex]);
-      if (tIndex != 3) Serial.println(timeDate[tIndex]);
-      else {
-        Serial.println(msn[timeDate[tIndex]]);
-      }
+      if (index == 5) index = 0;
+      else index++;
+      u8x8.clearDisplay();
     }
+    //long press on enter will save all currently stored values
     if (BPEnter == Button::ButtonStates::btnLongPressed) {
-        Serial.print("Date and time set to: ");
-        printDateTime();
+        tm.Year = timeDate[2]-1970;
+        tm.Month = timeDate[3];
+        tm.Day = timeDate[4];
+        tm.Hour = timeDate[0];
+        tm.Minute = timeDate[1];
+        tm.Second = 0;
+        ct = makeTime(tm);
+        myRTC.set(ct);
+        setTime(ct);
+        if (timeDate[5] == 0) ampmN24h = false;
+        else ampmN24h = true;
         menuMode = false;
         entered = true;
         return;
     }
     if (BPUp == Button::ButtonStates::btnPressed || BPUp == Button::ButtonStates::btnLongPressed) {
       timeoutTimer = millis();
-      if (hNM){
-        if (nSH >= 23) nSH = 0;
-        else nSH++; 
-      } else {
-        if (nSM >= 59) nSM = 0;
-        else nSM++;          
-      }
-      if (riseNotSet) Serial.print("Sunrise");
-      else Serial.print("Sunset");
-      Serial.print(" new time:");
-      print0X(nSH, ':');
-      print0X(nSM, 0);
-      Serial.println();
+      if(timeDate[index] >= tdLimit[index][1]) timeDate[index] = tdLimit[index][0];
+      else timeDate[index] ++;
+
     }
     if (BPDown == Button::ButtonStates::btnPressed || BPDown == Button::ButtonStates::btnLongPressed) {
       timeoutTimer = millis();
-      if (hNM){
-        if (nSH <= 0) nSH = 23;
-        else nSH--; 
-      } else {
-        if (nSM <= 0) nSM = 59;
-        else nSM--;          
-      }
-      if (riseNotSet) Serial.print("Sunrise");
-      else Serial.print("Sunset");
-      Serial.print(" new time:");
-      print0X(nSH, ':');
-      print0X(nSM, 0);
-      Serial.println();
+      if(timeDate[index] <= tdLimit[index][0]) timeDate[index] = tdLimit[index][1];
+      else timeDate[index] --;
+    }
+    if (millis()-timeoutTimer > timeoutTime) {
+      u8x8.clearDisplay();
+      menuMode = false;
+      entered  = true;
+      return;
     }
   }
-
-
 }
 //Sets sunset and sunrise times (pass true for sunrise, false for sunset)
 void setSunClock(bool riseNotSet) {
+  char * L1;
+  char * L2;
+  char * L3;
+  char * L3b = "  ";
   bool entered = false;
   bool hNM = true;
   int nSH = 0;
@@ -354,19 +429,37 @@ void setSunClock(bool riseNotSet) {
   if (riseNotSet) {
     nSH = sunriseHour;
     nSM = sunriseMinute;
-    Serial.print("Sunrise time currently: ");
+    L1 = "    Sunrise     ";
   }
   else {
     nSH = sunsetHour;
     nSM = sunsetMinute;
-    Serial.print("Sunset time currently: ");
+    L1 = "    Sunset      ";
   }
-  print0X(nSH, ':');
-  print0X(nSM, 0);
-  Serial.println();
-  while (entered == false && millis()-timeoutTimer<timeoutTime) {
+  L2 = "will be set to: ";
+
+  u8x8.clearDisplay();
+  while (entered == false) {
+    if (ampmN24h) {
+      makeTimeAMPM(nSH, nSM);
+      L3 = time12;
+    } else {
+      makeTime24(nSH, nSM);
+      L3 = time24;
+    }
+    u8x8.setFont(u8x8_font_chroma48medium8_r);
+    u8x8.drawString(0,0, L1);
+    u8x8.drawString(0,1, L2);
+    u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+    u8x8.drawString(0, 2, L3);
+    /*if ((millis()/1000)%2 ==0) {
+      if (hNM) u8x8.drawString(0, 2, L3);
+      else u8x8.drawString(3, 2, L3);
+    } */ 
+
     buttonCheck();
     if (BPMenu == Button::ButtonStates::btnPressed) {
+      u8x8.clearDisplay();
       timeoutTimer = millis();
       return;
     }
@@ -379,16 +472,18 @@ void setSunClock(bool riseNotSet) {
         if (riseNotSet) {
           sunriseHour = nSH;
           sunriseMinute = nSM;
-          Serial.print("Sunrise");
         } else {
           sunsetHour = nSH;
-          sunsetMinute = nSM;
-          Serial.print("Sunset");          
+          sunsetMinute = nSM;      
         }
-        Serial.print(" time set to: ");
-        print0X(nSH, ':');
-        print0X(nSM, 0);
-        Serial.println();
+        L2 = "    set to:     ";
+        u8x8.setFont(u8x8_font_chroma48medium8_r);
+        u8x8.drawString(0,0, L1);
+        u8x8.drawString(0,1, L2);
+        u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+        u8x8.drawString(0, 2, L3);
+        delay(1200);
+        u8x8.clearDisplay();
         menuMode = false;
         entered = true;
         return;
@@ -402,12 +497,6 @@ void setSunClock(bool riseNotSet) {
         if (nSM >= 59) nSM = 0;
         else nSM++;          
       }
-      if (riseNotSet) Serial.print("Sunrise");
-      else Serial.print("Sunset");
-      Serial.print(" new time:");
-      print0X(nSH, ':');
-      print0X(nSM, 0);
-      Serial.println();
     }
     if (BPDown == Button::ButtonStates::btnPressed || BPDown == Button::ButtonStates::btnLongPressed) {
       timeoutTimer = millis();
@@ -418,32 +507,30 @@ void setSunClock(bool riseNotSet) {
         if (nSM <= 0) nSM = 59;
         else nSM--;          
       }
-      if (riseNotSet) Serial.print("Sunrise");
-      else Serial.print("Sunset");
-      Serial.print(" new time:");
-      print0X(nSH, ':');
-      print0X(nSM, 0);
-      Serial.println();
+    }
+    if (millis()-timeoutTimer>timeoutTime) {
+      u8x8.clearDisplay();
+      menuMode = false;
+      entered = true;
     }
   }
 }
 //checks current hour and minute against setpoints to decide if a sunrise or sunset needs to be started
 //adjusts for sunset and sunrise lengths
-void sunAlarmCheck(time_t currentTime) {
-  int tNow = (hour(currentTime)*60+minute(currentTime));
+void sunAlarmCheck(time_t ct) {
+  int tNow = (hour(ct)*60+minute(ct));
   int sRT = (sunriseHour*60+sunriseMinute-sunriseLength);
   int sST = (sunsetHour*60+sunsetMinute-sunriseLength);
   if (clockWrite  == 500) {
   Serial.print("Time now: ");
-  print0X(tNow/60, ':');
-  print0X(tNow%60, 0);
+  makeTimeAMPM(hour(ct), minute(ct));
+  Serial.print(time12);
   Serial.print(". Sunrise Start Time: ");
-  print0X(sRT/60, ':');
-  print0X(sRT%60, 0);
+  makeTimeAMPM(sRT/60, sRT%60);
+  Serial.print(time12);
   Serial.print(". Sunset Start Time: ");
-  print0X(sST/60, ':');
-  print0X(sST%60, 0);
-  Serial.println(".");
+  makeTimeAMPM(sST/60, sST%60);
+  Serial.print(time12);
   }
   if (tNow == sRT && !sunRising && !lightOn && sunriseLength > 0) {
     sunMilliTimer = millis();
@@ -466,88 +553,91 @@ void sunAlarmCheck(time_t currentTime) {
   }
   if(sunSetting && !lightOn) {
     long sTR = long(sunsetLength*60000)+sunMilliTimer-millis();
-    Serial.print("SunTime:");
-    Serial.println(sunTime);
     sunset(sTR);
   }
 }
 //set sunrise or sunset length, to maximum of 120 minutes
 //has a boolean to test for error message type
 void setSunLength(bool riseNotSet) {
+  char * L1;
+  char * L2;
+  char * L3;
+  char nSL[4] = "";  
   timeoutTimer = millis();
   bool entered = false;
-  float newSunLength;
+  int newSunLength;
   if (riseNotSet) {
-    newSunLength = float(sunriseLength);
-    Serial.print("Sunrise time in minutes: ");
+    newSunLength = sunriseLength;
+    L1 = "  Sunrise time  ";
   }
   else {
     newSunLength = sunsetLength;
-    Serial.print("Sunset time in minutes:");
+    L1 = "  Sunset time   ";
   }
-  Serial.println(newSunLength);
-  while (entered == false && millis()-timeoutTimer<timeoutTime) {
+  L2 = "  in minutes:   ";
+  u8x8.clearDisplay();
+  while (entered == false) {
+    nSL[0] = chMkr(newSunLength/100, ' ');
+    if (newSunLength>99) nSL[1] = chMkr((newSunLength%100)/10, '0');
+    else nSL[1] = chMkr((newSunLength%100)/10, ' ');
+    nSL[2] = chMkr(newSunLength%10, '0');
+    if (newSunLength == 0) L3 = "Off";
+    else if (newSunLength ==120) L3 = "Max";
+    else L3 = nSL;
+    u8x8.setFont(u8x8_font_chroma48medium8_r);
+    u8x8.drawString(0,0, L1);
+    u8x8.drawString(0,1, L2);
+    u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+    u8x8.drawString(3, 2, L3);  
     buttonCheck();
     if (BPMenu == Button::ButtonStates::btnPressed) {
       timeoutTimer = millis();
+      u8x8.clearDisplay();
       return;
     }
-    if (BPEnter == Button::ButtonStates::btnPressed) {
+    if (BPEnter == Button::ButtonStates::btnPressed || BPEnter == Button::ButtonStates::btnLongPressed) {
       if (riseNotSet) {
-        sunriseLength = int(newSunLength);
-        Serial.print("Sunrise");
+        sunriseLength = newSunLength;
+        L1 = " Sunrise Length ";
       }
       else if (!riseNotSet) {
         sunsetLength = newSunLength;
-        Serial.print("Sunset");
+        L1 = " Sunset Length  ";
       }
-      Serial.print(" length set to: ");
-      Serial.print(newSunLength);
+      L2 = "     set to:    ";
+      u8x8.setFont(u8x8_font_chroma48medium8_r);
+      u8x8.drawString(0,0, L1);
+      u8x8.drawString(0,1, L2);
+      u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
+      u8x8.drawString(3, 2, L3); 
+      delay(1200);
+      u8x8.clearDisplay();      
       menuMode = false;
       entered = true;
       return;
     }
     if (newSunLength < 120) {
-      if (BPUp == Button::ButtonStates::btnPressed) {
+      if (BPUp == Button::ButtonStates::btnLongPressed || BPUp == Button::ButtonStates::btnPressed) {
         timeoutTimer = millis();
         newSunLength++;
-        Serial.print("Sunrise length, in minutes: ");
-        Serial.println(newSunLength);
       }
-      else if (BPUp == Button::ButtonStates::btnLongPressed) {
-        timeoutTimer = millis();
-        newSunLength++;
-        Serial.print("Sunrise length, in minutes: ");
-        Serial.println(newSunLength);
-      }
-    } else if (BPUp == Button::ButtonStates::btnLongPressed || BPUp == Button::ButtonStates::btnPressed) {
-      timeoutTimer = millis();
-      Serial.println("120 minutes is maximum!");
     }
-    
     if (newSunLength > 0) {
-      if  (BPDown == Button::ButtonStates::btnPressed) {
+      if  (BPDown == Button::ButtonStates::btnLongPressed || BPDown == Button::ButtonStates::btnPressed) {
         timeoutTimer = millis();
         newSunLength--;
-        Serial.print("Sunrise length, in minutes: ");
-        Serial.println(newSunLength);
       }
-      else if (BPDown == Button::ButtonStates::btnLongPressed) {
-        timeoutTimer = millis();
-        newSunLength--;
-        Serial.print("Sunrise length, in minutes: ");
-        Serial.println(newSunLength);
-      }
-    } else if (BPDown == Button::ButtonStates::btnLongPressed || BPDown == Button::ButtonStates::btnPressed) {
-      timeoutTimer = millis();
-      if (riseNotSet) Serial.println("Sunrise is turned off.");
-      else Serial.println("Sunset is turned off.");
-    }   
-    
+    } 
+    if (millis()-timeoutTimer>timeoutTime) {
+      u8x8.clearDisplay();      
+      menuMode = false;
+      entered = true;
+      return;
+    }
   }
 }
 
-//Color calculations based on formulas that are calibrated to a sunTime value of 155 maximum
+//Color calculations based on formulas that are calibrated to a sunTime L2 of 155 maximum
 //the -45 shifts the function to start the red curve at 0
 //red is the dimmest color led, so it needs maximum final brightness
 int colorCalcRed(float sunTime) {
@@ -625,62 +715,127 @@ void sunset(long sTR) {
     }
   }
 }
-//uses time object to get, set and write the time to/from rtc
-void timeFormatter() {
+void timeInit() {
   time_t t;
   tmElements_t tm;
-  String CDate = __DATE__;
-  String CTime = __TIME__;
-  tm.Year = ((CDate.substring(9,11).toInt())+30);
-  if (CDate.substring(4,4) == " ") tm.Day = (('0'+CDate.substring(4)).toInt());
-  else tm.Day = CDate.substring(4,6).toInt();
-  String CMo = CDate.substring(0,3);
-  String msn[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-  for (int i=0; i<13; i++) {
-    if (msn[i] == CMo) {
+  char CDate[12] = __DATE__;
+  char CTime[8] = __TIME__;
+  char CMo[4] = {CDate[0],CDate[1],CDate[2],'\0'};
+  char msn[12][4] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  for (int i=0; i<12; i++) {
+    if ( strcmp(msn[i], CMo) == 0) {
         tm.Month = (i+1);
-      } else if (i ==13) {
-      Serial.println("Month is undefined");
       }
     }
-  tm.Hour = CTime.substring(0,2).toInt();
-  tm.Minute = CTime.substring(3,5).toInt();
-  tm.Second = CTime.substring(6).toInt();
+  tm.Hour = 10*(CTime[0]-'0')+(CTime[1]-'0');
+  tm.Minute = 10*(CTime[3]-'0')+(CTime[4]-'0');
+  tm.Second = 10*(CTime[6]- '0')+(CTime[7]-'0');
+  tm.Year = 10*(CDate[9]-'0')+30+(CDate[10]-'0');
+  tm.Day = 10*(CDate[4]-'0')+(CDate[5]-'0');
   t = makeTime(tm);
-  if (t>myRTC.get()) myRTC.set(t);
+  myRTC.set(t);
   setTime(t);
   Serial.print("RTC set to: ");
-  printDateTime(t);
+  printDateTime(t, true);
   Serial.println();
-  
 }
 
 // print date and time
-void printDateTime(time_t t) {
-    printDate(t);
-    Serial.print(' ');
-    printTime24(t);
+void printDateTime(time_t t, bool ampm) {
+  makeDate(t);
+  Serial.print(date);
+  Serial.print(" ");
+  if (!ampm) {
+    makeTime24(t);
+    Serial.println(time24);
+  } else {
+    makeTimeAMPM(hour(t), minute(t));
+    Serial.println(time12);      
+  }
 }
-
-void printTime24(time_t t) {
-    print0X(hour(t), ':');
-    print0X(minute(t), ':');
-    print0X(second(t), ' ');
-    Serial.println();
+// AM/PM time formatter for time_t objects. blinks the ':' every second
+void makeTimeAMPM(time_t t) {
+  int h = hour(t);
+  int m = minute(t);
+  makeTimeAMPM(h, m);
+  if (second(t)%2 == 0) time12[2] = ' ';
 }
-
-void printDate(time_t t) {
-    print0X(day(t), 0);
-    Serial.print(" ");
-    Serial.print(monthShortStr(month(t)));
-    Serial.print(" ");
-    Serial.print(year(t));
-    Serial.print(" ");
+// AM/PM time formatter for hour and minute ints
+void makeTimeAMPM(int h, int m) {
+  bool ispm = false;
+  if (h>12) {
+    h -= 12;
+    ispm = true;
+  }
+  time12[0] = chMkr(h/10, ' ');
+  time12[1] = chMkr(h%10, '0');
+  time12[2] = ':';
+  time12[3] = chMkr(m/10, '0');
+  time12[4] = chMkr(m%10, '0');
+  if (ispm) time12[5] = 'p';
+  else time12[5] = 'a';
+  time12[6] = 'm';
 }
-//formatter for single digit times
-void print0X(int val, char delim) {
-    if (val < 10) Serial.print('0');
-    Serial.print(val);
-    if (delim > 0) Serial.print(delim);
-    return;
+// 24 Hour time formatter. blinks  the ':' every second
+void makeTime24(time_t t) {
+  makeTime24(hour(t), minute(t));
+  if (second(t)%2 == 0) time24[2] = ' '; 
+}
+//24 Hour time formatter for hour and minute ints
+void makeTime24(int h, int m) {
+  time24[0] = chMkr(h/10, ' ');
+  time24[1] = chMkr(h%10, '0');
+  time24[2] = ':';
+  time24[3] = chMkr(m/10, '0');
+  time24[4] = chMkr(m%10, '0');
+}
+// Date formatter
+void makeDate(time_t t) {
+  date[0] = chMkr(day(t)/10, ' ');
+  date[1] = chMkr(day(t)%10, '0');
+  date[2] = ' ';
+  char msn[12][4] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  date[3] = msn[month(t)-1][0];
+  date[4] = msn[month(t)-1][1];
+  date[5] = msn[month(t)-1][2];
+  date[6] = ' ';
+  date[7] = chMkr(year(t)/1000, '0');
+  date[8] = chMkr((year(t)%1000)/100, '0');
+  date[9] = chMkr((year(t)%100)/10, '0');
+  date[10] = chMkr(year(t)%10, '0');
+}
+//for turning single digits into chars because arduino. filler for when 0 is not desired
+char chMkr(int x, char fill) {
+  switch (x) {
+  case 0:
+    return fill;
+    break;
+  case 1:
+    return '1';
+    break;
+  case 2:
+    return '2';
+    break;
+  case 3:
+    return '3';
+    break;
+  case 4:
+    return '4';
+    break;
+  case 5:
+    return '5';
+    break;
+  case 6:
+    return '6';
+    break; 
+  case 7:
+    return '7';
+    break;
+  case 8:
+    return '8';
+    break;
+  case 9:
+    return '9';
+    break;     
+  }
 }
