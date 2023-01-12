@@ -19,7 +19,8 @@
 DS3232RTC myRTC;
 
 //initializing screen
-U8X8_SH1106_128X32_VISIONOX_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
+//U8X8_SH1106_128X32_VISIONOX_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE); //UNO
+U8X8_SSD1306_128X32_UNIVISION_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE); //NANO
 
 //pins assignments
 const int snoozePin = 2;
@@ -69,8 +70,6 @@ char time12[8] = "";
 char time24[6] = "";
 char date[12] = "";
 bool ampmN24h = true;
-
-
 //creating a button class to handle debounce and long press functions
 class Button {
   private:
@@ -146,13 +145,12 @@ class Button {
     return latch;
   }
 };
-
+//buttons to be initialized
 Button menuBtn(menuPin);
 Button enterBtn(enterPin);
 Button upBtn(upPin);
 Button downBtn(downPin);
 Button snoozeBtn(snoozePin);
-
 
 //setup runs at startup.
 //currently sets real time clock to compile time
@@ -179,7 +177,6 @@ void setup() {
   time24[5] = '\0';
   date[11] = '\0';
 }
-
 //main loop - keeps track of button presses, calls sunrise and sunset checks
 void loop() {
   time_t currentTime = now();
@@ -191,24 +188,12 @@ void loop() {
     Serial.println("LongSnooze");
     snooze();
   }
-
   if(BPMenu == Button::ButtonStates::btnPressed && !menuMode) {
     menuMode = true;
     timeoutTimer = millis();
     menu();
   }
   printScreen(currentTime);
-  
-
-
-
-  if (clockWrite == 500 && !menuMode) {
-    printDateTime(currentTime, true);
-
-    clockWrite = 0;
-  } else {
-    clockWrite += 1;
-  }
   sunAlarmCheck(currentTime);
   delay(1);
 }
@@ -249,10 +234,9 @@ void printClock(time_t t) {
   else L3 = "                ";
   u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
   u8x8.drawString(0, 0, L1);
-  u8x8.setFont(u8x8_font_chroma48medium8_r);
+  u8x8.setFont(u8x8_font_artossans8_r);
   u8x8.drawString(2, 2, L2);
   u8x8.drawString(0, 3, L3);
-
 }
 //snooze button function, also functions as light switch when sun is not rising
 void snooze() {
@@ -290,7 +274,7 @@ void menu() {
   char menuItems[5][17] = {"   Set Clock    ", "  Sunrise Time  ", " Sunrise Length ", "  Sunset Time   ", " Sunset Length  "};
   while (menuMode){
     L1 = menuItems[menuIndex];
-    u8x8.setFont(u8x8_font_chroma48medium8_r);
+    u8x8.setFont(u8x8_font_artossans8_r);
     u8x8.drawString(0, 3, L1);
     buttonCheck();  
     if(BPUp == Button::ButtonStates::btnPressed) {
@@ -458,25 +442,38 @@ void setSunClock(bool riseNotSet) {
     L1 = "    Sunset      ";
   }
   L2 = "will be set to: ";
-
   u8x8.clearDisplay();
   while (entered == false) {
     if (ampmN24h) {
       makeTimeAMPM(nSH, nSM);
+      if ((millis()/500)%2 == 0) {
+        if (hNM) {
+          time12[0] = ' ';
+          time12[1] = ' ';
+        } else {
+          time12[3] = ' ';
+          time12[4] = ' ';
+        }
+      }
       L3 = time12;
     } else {
       makeTime24(nSH, nSM);
+      if ((millis()/500)%2 == 0) {
+        if (hNM) {
+          time24[0] = ' ';
+          time24[1] = ' ';
+        } else {
+          time24[3] = ' ';
+          time24[4] = ' ';
+        }
+      }
       L3 = time24;
     }
-    u8x8.setFont(u8x8_font_chroma48medium8_r);
+    u8x8.setFont(u8x8_font_artossans8_r);
     u8x8.drawString(0,0, L1);
     u8x8.drawString(0,1, L2);
     u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
     u8x8.drawString(0, 2, L3);
-    /*if ((millis()/1000)%2 ==0) {
-      if (hNM) u8x8.drawString(0, 2, L3);
-      else u8x8.drawString(3, 2, L3);
-    } */ 
 
     buttonCheck();
     if (BPMenu == Button::ButtonStates::btnPressed) {
@@ -498,7 +495,14 @@ void setSunClock(bool riseNotSet) {
           sunsetMinute = nSM;      
         }
         L2 = "    set to:     ";
-        u8x8.setFont(u8x8_font_chroma48medium8_r);
+        if (ampmN24h) {
+          makeTimeAMPM(nSH, nSM);
+          L3 = time12;
+        } else {
+          makeTime24(nSH, nSM);
+          L3 = time24;
+        }
+        u8x8.setFont(u8x8_font_artossans8_r);
         u8x8.drawString(0,0, L1);
         u8x8.drawString(0,1, L2);
         u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
@@ -605,7 +609,7 @@ void setSunLength(bool riseNotSet) {
     if (newSunLength == 0) L3 = "Off";
     else if (newSunLength ==120) L3 = "Max";
     else L3 = nSL;
-    u8x8.setFont(u8x8_font_chroma48medium8_r);
+    u8x8.setFont(u8x8_font_artossans8_r);
     u8x8.drawString(0,0, L1);
     u8x8.drawString(0,1, L2);
     u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
@@ -626,7 +630,7 @@ void setSunLength(bool riseNotSet) {
         L1 = " Sunset Length  ";
       }
       L2 = "     set to:    ";
-      u8x8.setFont(u8x8_font_chroma48medium8_r);
+      u8x8.setFont(u8x8_font_artossans8_r);
       u8x8.drawString(0,0, L1);
       u8x8.drawString(0,1, L2);
       u8x8.setFont(u8x8_font_px437wyse700b_2x2_r);
@@ -657,7 +661,6 @@ void setSunLength(bool riseNotSet) {
     }
   }
 }
-
 //Color calculations based on formulas that are calibrated to a sunTime L2 of 155 maximum
 //the -45 shifts the function to start the red curve at 0
 //red is the dimmest color led, so it needs maximum final brightness
@@ -760,7 +763,6 @@ void timeInit() {
   printDateTime(t, true);
   Serial.println();
 }
-
 // print date and time
 void printDateTime(time_t t, bool ampm) {
   makeDate(t);
@@ -783,18 +785,21 @@ void makeTimeAMPM(time_t t) {
 }
 // AM/PM time formatter for hour and minute ints
 void makeTimeAMPM(int h, int m) {
-  bool ispm = false;
   if (h>12) {
-    h -= 12;
-    ispm = true;
+    time12[0] = chMkr((h-12)/10, ' ');
+    time12[1] = chMkr((h-12)%10, '0');
+  } else if (h == 0) {
+    time12[0] = '1';
+    time12[1] = '2';
+  } else {
+    time12[0] = chMkr(h/10, ' ');
+    time12[1] = chMkr(h%10, '0');      
   }
-  time12[0] = chMkr(h/10, ' ');
-  time12[1] = chMkr(h%10, '0');
   time12[2] = ':';
   time12[3] = chMkr(m/10, '0');
   time12[4] = chMkr(m%10, '0');
-  if (ispm) time12[5] = 'p';
-  else time12[5] = 'a';
+  if (h<11) time12[5] = 'a';
+  else time12[5] = 'p';
   time12[6] = 'm';
 }
 // 24 Hour time formatter. blinks  the ':' every second
