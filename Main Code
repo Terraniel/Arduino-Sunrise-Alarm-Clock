@@ -10,6 +10,7 @@
 //Screen Libraries required
 #include <Arduino.h>
 #include <U8x8lib.h>
+#include <EEPROM.h>
 
 //creating real time clock object
 DS3232RTC myRTC;
@@ -158,6 +159,12 @@ void setup() {
   //timeInit will set RTC to last compiled time in event of power loss
   //good for testing and initial setup, not for time recovery in situ
   //timeInit();
+  if (EEPROM.read(1) != 255) sunriseHour = EEPROM.read(1);
+  if (EEPROM.read(2) != 255) sunriseMinute = EEPROM.read(2);
+  if (EEPROM.read(3) != 255) sunriseLength = EEPROM.read(3);
+  if (EEPROM.read(4) != 255) sunsetHour = EEPROM.read(4);
+  if (EEPROM.read(5) != 255) sunsetMinute = EEPROM.read(5);
+  if (EEPROM.read(6) != 255) sunsetLength = EEPROM.read(6);
 }
 //main loop - keeps track of button presses, calls sunrise and sunset checks
 void loop() {
@@ -406,19 +413,22 @@ void setSunClock(bool riseNotSet) {
   char * L1;
   char * L2;
   char * L3;
-  char * L3b = "  ";
   bool entered = false;
   bool hNM = true;
   int nSH = 0;
   int nSM = 0;
   if (riseNotSet) {
     nSH = sunriseHour;
+    EEPROM.update(1, sunriseHour);
     nSM = sunriseMinute;
+    EEPROM.update(2, sunriseMinute);
     L1 = "    Sunrise     ";
   }
   else {
     nSH = sunsetHour;
+    EEPROM.update(4, sunsetHour);
     nSM = sunsetMinute;
+    EEPROM.update(5, sunsetMinute);
     L1 = "    Sunset      ";
   }
   L2 = "will be set to: ";
@@ -562,10 +572,12 @@ void setSunLength(bool riseNotSet) {
     if (BPEnter == Button::ButtonStates::btnPressed || BPEnter == Button::ButtonStates::btnLongPressed) {
       if (riseNotSet) {
         sunriseLength = newSunLength;
+        EEPROM.update(3, sunriseLength);
         L1 = " Sunrise Length ";
       }
       else if (!riseNotSet) {
         sunsetLength = newSunLength;
+        EEPROM.update(6, sunsetLength);
         L1 = " Sunset Length  ";
       }
       L2 = "     set to:    ";
@@ -606,30 +618,17 @@ void sunAlarmCheck(time_t ct) {
   int tNow = (hour(ct)*60+minute(ct));
   int sRT = (sunriseHour*60+sunriseMinute-sunriseLength);
   int sST = (sunsetHour*60+sunsetMinute-sunriseLength);
-  if (clockWrite  == 500) {
-  Serial.print("Time now: ");
-  makeTimeAMPM(hour(ct), minute(ct));
-  Serial.print(time12);
-  Serial.print(". Sunrise Start Time: ");
-  makeTimeAMPM(sRT/60, sRT%60);
-  Serial.print(time12);
-  Serial.print(". Sunset Start Time: ");
-  makeTimeAMPM(sST/60, sST%60);
-  Serial.print(time12);
-  }
   if (tNow == sRT && !sunRising && !lightOn && sunriseLength > 0) {
     sunMilliTimer = millis();
     sunRising = true;
     sunSetting = false;
     sunTime = 0;
-    Serial.println("Sun is Rising");
   } else if (tNow == sST && !sunSetting && lightOn) {
     sunMilliTimer = millis();
     sunSetting = true;
     sunRising = false;
     sunTime = sunMax;
     lightOn = false;
-    Serial.print("Sun is Setting ");
   }
   
   if(sunRising && !lightOn && sunsetLength > 0) {
@@ -694,13 +693,10 @@ void sunrise(long sTR) {
       writeSunColor();
       if (snoozing) sunTime = float(sunMax)*(1.00-(float(sTR+10)/60000)/float(sunriseLength)); 
       else sunTime = float(sunMax)*(1-(float(sTR)/60000)/float(sunriseLength));
-      //Serial.print(sunTime);
     } else {
       sunRising = false;
       snoozing = false;
-      lightOn = true;      
-      Serial.println();
-      Serial.println("Sun has risen");
+      lightOn = true;
     }
   }
 }
@@ -710,12 +706,9 @@ void sunset(long sTR) {
     if(sunTime>0) {
       writeSunColor();
       sunTime = float(sunMax)*((float(sTR)/60000)/float(sunsetLength));
-      //Serial.print(sunTime);
     } else {
       sunSetting = false;
       lightOn = false;
-      Serial.println();
-      Serial.println("Sun has set");
     }
   }
 }
