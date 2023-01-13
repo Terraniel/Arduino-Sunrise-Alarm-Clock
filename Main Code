@@ -1,7 +1,7 @@
 // Sunrise/sunset Clock with display and 5 button control
 //Hardware: Arduino Uno, DS3231 RTC, 1608 display with I2C adapter, 5 buttons (NO, momentary), 3 LED mosfets, RGB leds (or discrete) 
 //
-//Dan Bouchard 31Dec2022
+//Dan Bouchard 13 Jan 2023
 
 //clock and timing libraries required
 #include <DS3232RTC.h>
