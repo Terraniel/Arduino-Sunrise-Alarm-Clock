@@ -1,6 +1,6 @@
 // Sunrise/sunset Clock with display and 5 button control
-//Hardware: Arduino Uno, DS3231 RTC, 1608 display with I2C adapter, 5 buttons (NO, momentary), 3 LED mosfets, RGB leds (or discrete) 
-//
+//Hardware: Arduino Uno, DS3231 I2C RTC, 128x32 display with I2C, 5 buttons (NO, momentary), 3 LED mosfets (currently IRF520N, but should upgrade to IRLZ44N), RGB leds (or discrete). 
+//future updates may include changes to the lighting output functions in order to accomodate RED, Warm White and Cool White LEDs for better sunrise simulation.
 //Dan Bouchard 13 Jan 2023
 
 //clock and timing libraries required
@@ -10,10 +10,6 @@
 //Screen Libraries required
 #include <Arduino.h>
 #include <U8x8lib.h>
-
-//#ifdef U8X8_HAVE_HW_SPI
-//#include <SPI.h>
-//#endif
 
 //creating real time clock object
 DS3232RTC myRTC;
@@ -151,39 +147,22 @@ Button enterBtn(enterPin);
 Button upBtn(upPin);
 Button downBtn(downPin);
 Button snoozeBtn(snoozePin);
-
 //setup runs at startup.
-//currently sets real time clock to compile time
 void setup() {
-  Serial.begin(9600);
   u8x8.begin();
-  Serial.println("Setting Up");
-  Serial.println(__TIME__);
-  Serial.println(__DATE__);
   pinMode(LEDRed, OUTPUT);
   pinMode(LEDGreen, OUTPUT);
   pinMode(LEDBlue, OUTPUT);
   myRTC.begin();
-  Serial.println("Clock started");
   setSyncProvider(myRTC.get);
-  if(timeStatus() != timeSet) {
-    Serial.println("Unable to sync with the RTC");
-  } else {
-    Serial.println("RTC has set the system time");
-    Serial.println("Setup Complete");
-  }
   //timeInit will set RTC to last compiled time in event of power loss
-  //good for testing, not for time recovery in situ
+  //good for testing and initial setup, not for time recovery in situ
   //timeInit();
-  time12[7] ='\0';
-  time24[5] = '\0';
-  date[11] = '\0';
 }
 //main loop - keeps track of button presses, calls sunrise and sunset checks
 void loop() {
   time_t currentTime = now();
   buttonCheck();
-
   if (BPSnooze == Button::ButtonStates::btnPressed) snoozeLightSwitch();
   if (BPSnooze == Button::ButtonStates::btnLongPressed && !snoozeBtn.btnLatchOutput()) {
     snoozeBtn.btnLatch(true);
@@ -197,7 +176,6 @@ void loop() {
   }
   printScreen(currentTime);
   sunAlarmCheck(currentTime);
-  delay(1);
 }
 //Screen printing handler
 void printScreen (time_t t) {
@@ -542,47 +520,6 @@ void setSunClock(bool riseNotSet) {
     }
   }
 }
-//checks current hour and minute against setpoints to decide if a sunrise or sunset needs to be started
-//adjusts for sunset and sunrise lengths
-void sunAlarmCheck(time_t ct) {
-  int tNow = (hour(ct)*60+minute(ct));
-  int sRT = (sunriseHour*60+sunriseMinute-sunriseLength);
-  int sST = (sunsetHour*60+sunsetMinute-sunriseLength);
-  if (clockWrite  == 500) {
-  Serial.print("Time now: ");
-  makeTimeAMPM(hour(ct), minute(ct));
-  Serial.print(time12);
-  Serial.print(". Sunrise Start Time: ");
-  makeTimeAMPM(sRT/60, sRT%60);
-  Serial.print(time12);
-  Serial.print(". Sunset Start Time: ");
-  makeTimeAMPM(sST/60, sST%60);
-  Serial.print(time12);
-  }
-  if (tNow == sRT && !sunRising && !lightOn && sunriseLength > 0) {
-    sunMilliTimer = millis();
-    sunRising = true;
-    sunSetting = false;
-    sunTime = 0;
-    Serial.println("Sun is Rising");
-  } else if (tNow == sST && !sunSetting && lightOn) {
-    sunMilliTimer = millis();
-    sunSetting = true;
-    sunRising = false;
-    sunTime = sunMax;
-    lightOn = false;
-    Serial.print("Sun is Setting ");
-  }
-  
-  if(sunRising && !lightOn && sunsetLength > 0) {
-    long sTR = long(sunriseLength*60000)+sunMilliTimer-millis();   
-    sunrise(sTR);
-  }
-  if(sunSetting && !lightOn) {
-    long sTR = long(sunsetLength*60000)+sunMilliTimer-millis();
-    sunset(sTR);
-  }
-}
 //set sunrise or sunset length, to maximum of 120 minutes
 //has a boolean to test for error message type
 void setSunLength(bool riseNotSet) {
@@ -661,6 +598,47 @@ void setSunLength(bool riseNotSet) {
       entered = true;
       return;
     }
+  }
+}
+//checks current hour and minute against setpoints to decide if a sunrise or sunset needs to be started
+//adjusts for sunset and sunrise lengths
+void sunAlarmCheck(time_t ct) {
+  int tNow = (hour(ct)*60+minute(ct));
+  int sRT = (sunriseHour*60+sunriseMinute-sunriseLength);
+  int sST = (sunsetHour*60+sunsetMinute-sunriseLength);
+  if (clockWrite  == 500) {
+  Serial.print("Time now: ");
+  makeTimeAMPM(hour(ct), minute(ct));
+  Serial.print(time12);
+  Serial.print(". Sunrise Start Time: ");
+  makeTimeAMPM(sRT/60, sRT%60);
+  Serial.print(time12);
+  Serial.print(". Sunset Start Time: ");
+  makeTimeAMPM(sST/60, sST%60);
+  Serial.print(time12);
+  }
+  if (tNow == sRT && !sunRising && !lightOn && sunriseLength > 0) {
+    sunMilliTimer = millis();
+    sunRising = true;
+    sunSetting = false;
+    sunTime = 0;
+    Serial.println("Sun is Rising");
+  } else if (tNow == sST && !sunSetting && lightOn) {
+    sunMilliTimer = millis();
+    sunSetting = true;
+    sunRising = false;
+    sunTime = sunMax;
+    lightOn = false;
+    Serial.print("Sun is Setting ");
+  }
+  
+  if(sunRising && !lightOn && sunsetLength > 0) {
+    long sTR = long(sunriseLength*60000)+sunMilliTimer-millis();   
+    sunrise(sTR);
+  }
+  if(sunSetting && !lightOn) {
+    long sTR = long(sunsetLength*60000)+sunMilliTimer-millis();
+    sunset(sTR);
   }
 }
 //Color calculations based on formulas that are calibrated to a sunTime L2 of 155 maximum
