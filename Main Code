@@ -172,7 +172,9 @@ void setup() {
     Serial.println("RTC has set the system time");
     Serial.println("Setup Complete");
   }
-  timeInit();
+  //timeInit will set RTC to last compiled time in event of power loss
+  //good for testing, not for time recovery in situ
+  //timeInit();
   time12[7] ='\0';
   time24[5] = '\0';
   date[11] = '\0';
@@ -354,7 +356,7 @@ void setClockTime(void) {
       numVals[0] = chMkr(timeDate[index]/1000,' ');
       if (index == 2) numVals[1] = chMkr((timeDate[index]%1000)/100, '0');
       else numVals[1] = ' ';
-      if (index == 4) numVals[2] = chMkr((timeDate[index]%100)/10, '0');
+      if (index == 2) numVals[2] = chMkr((timeDate[index]%100)/10, '0');
       else numVals[2] = chMkr((timeDate[index]%100)/10, ' ');
       numVals[3] = chMkr((timeDate[index]%10), '0');
       }
