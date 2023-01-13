@@ -419,16 +419,12 @@ void setSunClock(bool riseNotSet) {
   int nSM = 0;
   if (riseNotSet) {
     nSH = sunriseHour;
-    EEPROM.update(1, sunriseHour);
     nSM = sunriseMinute;
-    EEPROM.update(2, sunriseMinute);
     L1 = "    Sunrise     ";
   }
   else {
     nSH = sunsetHour;
-    EEPROM.update(4, sunsetHour);
     nSM = sunsetMinute;
-    EEPROM.update(5, sunsetMinute);
     L1 = "    Sunset      ";
   }
   L2 = "will be set to: ";
@@ -478,11 +474,14 @@ void setSunClock(bool riseNotSet) {
     }
     if (BPEnter == Button::ButtonStates::btnLongPressed) {
         if (riseNotSet) {
-          sunriseHour = nSH;
+          EEPROM.update(1, sunriseHour);
           sunriseMinute = nSM;
+          EEPROM.update(2, sunriseMinute);
         } else {
           sunsetHour = nSH;
-          sunsetMinute = nSM;      
+          EEPROM.update(4, sunsetHour);
+          sunsetMinute = nSM;
+          EEPROM.update(5, sunsetMinute);      
         }
         L2 = "    set to:     ";
         if (ampmN24h) {
