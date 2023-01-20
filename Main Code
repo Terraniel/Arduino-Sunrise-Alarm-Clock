@@ -34,8 +34,7 @@ const int greenMax = 100;
 const int blueMax = 80;
 bool lightOn = false;
 //sunset, and sunset variables
-const int sunMax = 149;
-
+const int sunMax = 255;
 int sunriseHour = 8;
 int sunriseMinute = 0;
 int sunriseLength = 60;
@@ -639,44 +638,24 @@ void sunAlarmCheck(time_t ct) {
     sunset(sTR);
   }
 }
-//Color calculations based on formulas that are calibrated to a sunTime L2 of 155 maximum
-//the -45 shifts the function to start the red curve at 0
+//Color calculation based on formulas that are calibrated to a sunTime L2 of 255 maximum
+//sTime is the current point in the sun cycle
+//max determines how bright the color will get
+//stretch will shorten the time to reach full brightness
+//shift will delay when the color starts ramping up
+//adj is to adjust the starting brightness of the color
 //red is the dimmest color led, so it needs maximum final brightness
-int colorCalcRed(float sunTime) {
-  double x = sunTime;
-  double mx = redMax;
-  x = (sunTime-45);
-  double C = mx-mx/(1+pow(1.15, x));
-  int redVal = C;
-  return max(0,redVal);
+int colorCalc(float sTime, float max, float stretch, float shift, float adj) {
+  float x = sTime - shift;
+  float C = max-(max+adj)/(1+pow(stretch, x));
+  int Val = C;
+  return max(0, Val);
 } 
-//Color calculation for green. Needs to happen later than red. 
-//The -80 will determine how much later after sunrise start.
-//this will start turning the light orange (depends on greenMax)
-int colorCalcGreen(float sunTime) {
-  double x = sunTime;
-  double mx = greenMax;
-  x = (sunTime-80);
-  double C = mx-mx/(1+pow(1.15, x));
-  int greenVal = C;
-  return max(0,greenVal);
-}
-//Color calculation for blue. Needs to happen later than green. 
-//The -90 will determine how much later after sunrise start.
-//this will start turning the light white (depends on blueMax)
-int colorCalcBlue(float sunTime) {
-  double x = sunTime;
-  double mx = blueMax;
-  x = (sunTime-90);
-  double C = mx-mx/(1+pow(1.15, x));
-  int blueVal = C;
-  return max(0,blueVal);
-}
 //Writes the RGB values for sun color.
 void writeSunColor() {
-  int R = colorCalcRed(sunTime);
-  int G = colorCalcGreen(sunTime);
-  int B = colorCalcBlue(sunTime);
+  int R = colorCalc(sunTime, 255, 1.03, 150, 2);
+  int G = colorCalc(sunTime, 105, 1.04, 150, 1);
+  int B = colorCalc(sunTime, 100, 1.05, 180, 0);
   switchLEDs(R, G, B);
 }
 //Simple LED output Writer
